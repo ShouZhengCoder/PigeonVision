@@ -1,0 +1,5 @@
+path: /home/u2023312335/project/learn/PigeonVision/data/yolo_dataset
+train: /home/u2023312335/project/learn/PigeonVision/data/yolo_dataset/train.txt
+val: /home/u2023312335/project/learn/PigeonVision/data/yolo_dataset/val.txt
+nc: 1
+names: ['eye']
