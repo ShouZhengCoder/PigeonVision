@@ -1,0 +1,10 @@
+data: data/yolo_dataset/data.yaml
+model: yolov5s.pt
+epochs: 100
+batch: 16
+imgsz: 416
+project: checkpoints/detection
+name: exp
+runtime_dataset: checkpoints/detection/runtime_dataset
+confidence_threshold: 0.7
+bbox_expand_ratio: 0.1
