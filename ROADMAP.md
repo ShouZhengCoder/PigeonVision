@@ -26,7 +26,7 @@
 ```
 原始鸽眼图
   └─[Stage 2: YOLOv5]─→ 眼部 bbox 裁剪
-       └─[Stage 3: Hough归一化]─→ 64×512 虹膜纹理图
+       └─[Stage 3: U-Net分割 + 椭圆展开]─→ 64×512 虹膜纹理图
             └─[Stage 4: 孪生网络]─→ 128-dim L2归一化特征向量
                  ├─[Stage 5: 比对接口]─→ 欧氏距离 + 阈值判断
                  └─[Stage 5: 检索接口]─→ FAISS Top-K + PG_ID/BLOOD
@@ -47,6 +47,7 @@ PigeonVision/
 │   │   ├── 2/
 │   │   ├── ...
 │   │   └── 12/
+│   ├── unet_labelme_80/              ← 80 张手工标注样本（images / annotations / masks）
 │   └── datasetXGN/
 │       ├── anotations/               ← 9,979 个 JSON 标注文件
 │       ├── blood.csv                 ← 28,910 条血统
@@ -57,23 +58,25 @@ PigeonVision/
 ├── src/
 │   ├── stage1_data/                  ← 数据整理脚本
 │   ├── stage2_detection/             ← YOLOv5 目标检测
-│   ├── stage3_preprocess/            ← 虹膜定位与归一化
+│   ├── stage3_preprocess/            ← 虹膜分割与归一化
 │   ├── stage4_siamese/               ← 孪生网络训练
 │   ├── stage5_server/                ← Flask 后端服务
 │   └── stage6_android/               ← Android 部署
 │
 ├── configs/
 │   ├── yolov5.yaml                   ← YOLOv5 训练配置
+│   ├── unet.yaml                     ← U-Net 训练配置
 │   └── siamese.yaml                  ← 孪生网络训练配置
 │
 ├── checkpoints/
 │   ├── detection/                    ← YOLOv5 权重
+│   ├── segmentation/                 ← U-Net 权重
 │   └── siamese/                      ← 孪生网络权重
 │
 ├── outputs/
 │   ├── img_index.csv                 ← 图片ID到文件路径的索引（Stage 1 生成）
 │   ├── eye_crops/                    ← YOLO 裁剪的眼部图像
-│   ├── iris_normalized/              ← Hough 归一化后的虹膜图像（64×512）
+│   ├── iris_normalized/              ← U-Net + 椭圆展开后的虹膜图像（64×512）
 │   └── features/
 │       ├── feature_db.npy            ← 特征向量矩阵（N×128）
 │       ├── feature_db_meta.csv       ← img_id, pg_id, blood
@@ -110,7 +113,7 @@ img_id,path
 
 ## 关键数据格式说明
 
-### 标注 JSON（data/datasetXGN/anotations/*.json）
+### 标注 JSON（data/extracted/datasetXGN/anotations/*.json）
 
 ```json
 {
@@ -145,7 +148,7 @@ B02-6113358,606803
 读取方式：
 ```python
 import pandas as pd
-rel = pd.read_csv('data/datasetXGN/relations.csv',
+rel = pd.read_csv('data/extracted/datasetXGN/relations.csv',
                   header=None, names=['blood_id', 'img_id'])
 rel['img_id'] = rel['img_id'].astype(str)
 ```
@@ -209,13 +212,13 @@ h  = (y2 - y1) / img_height
 - 写入 `outputs/img_index.csv`（列：img_id, path）
 
 **src/stage1_data/convert_annotations.py**
-- 读取 `data/datasetXGN/anotations/` 下所有 JSON，只保留 `eye` 标签
+- 读取 `data/extracted/datasetXGN/anotations/` 下所有 JSON，只保留 `eye` 标签
 - **先查 img_index.csv，跳过图片不存在的标注文件，并统计缺失数量**
 - 转为 YOLO 格式 .txt，按 8:2 分割（seed=42）
 - 写入 `data/yolo_dataset/`，生成 `data.yaml`（train/val 均为绝对路径列表文件）
 
 **src/stage1_data/build_pairs.py**
-- 读取 `data/datasetXGN/relations.csv`（无 header，names=['blood_id','img_id']，img_id 强制转 str）
+- 读取 `data/extracted/datasetXGN/relations.csv`（无 header，names=['blood_id','img_id']，img_id 强制转 str）
 - 与标注集（anotations/ 目录中有 JSON 的 img_id）取交集，构建初始样本对
 - 正样本对：同 blood_id 且两张图都在标注集内，label=1；用 `itertools.combinations` 枚举
 - **必须去重**：同一对图片可能共属多个 blood_id，枚举后用 `set(frozenset(p) for p in pairs)` 去重
@@ -267,7 +270,7 @@ yolo train data=data/yolo_dataset/data.yaml model=yolov5s.pt epochs=100 batch=16
 
 ---
 
-## 阶段三：虹膜图像预处理
+## 阶段三：虹膜图像预处理（U-Net + 椭圆展开）
 
 **目标**：将眼部裁剪图转化为 64×512 虹膜纹理图。
 
@@ -275,11 +278,11 @@ yolo train data=data/yolo_dataset/data.yaml model=yolov5s.pt epochs=100 batch=16
 
 ```
 eye_crop.jpg
-  → 灰度化 → 高斯模糊(5×5)
-  → 水平/垂直一维投影 → 瞳孔粗略中心 (cx, cy)
-  → 以 (cx,cy) 为中心做 Canny(50, 150)
-  → cv2.HoughCircles 找内圆（瞳孔边界）和外圆（虹膜/巩膜边界）
-  → Daugman 极坐标展开：径向 64 步，角向 512 步，双线性插值
+  → resize 到 256×256
+  → U-Net 语义分割（0=background, 1=iris, 2=pupil）
+  → 取 pupil / iris 最大连通域
+  → cv2.fitEllipse 拟合内外椭圆
+  → 椭圆版 Daugman 展开：角向 512 步，径向 64 步，双线性插值
   → 输出 64×512 灰度 PNG
 ```
 
@@ -287,27 +290,48 @@ eye_crop.jpg
 
 | 文件 | 内容 |
 |------|------|
-| `src/stage3_preprocess/iris_localize.py` | 定位+归一化核心函数 |
+| `configs/unet.yaml` | U-Net 训练配置 |
+| `src/stage3_preprocess/train_unet.py` | U-Net 训练脚本 |
+| `src/stage3_preprocess/iris_localize.py` | 分割+归一化核心函数 |
 | `src/stage3_preprocess/batch_normalize.py` | 批量处理 |
+| `src/stage3_preprocess/unet_common.py` | U-Net 公共模块与数据处理 |
+| `src/stage3_preprocess/visualize_samples.py` | 训练/推理结果可视化 |
+| `checkpoints/segmentation/best.pt` | 最优分割权重 |
 | `outputs/iris_normalized/<img_id>.png` | 64×512 虹膜图 |
-| `outputs/iris_normalized/normalize_meta.csv` | img_id, status, cx, cy, r_inner, r_outer |
+| `outputs/iris_normalized/normalize_meta.csv` | img_id, status, cx, cy, r_inner, r_outer, ellipse, mask_confidence |
 
-### 关键参数（可调）
+### 训练约定
+
+- 输入尺寸固定为 `256×256`
+- 输入通道固定为 1 通道灰度，训练和推理必须一致
+- U-Net 采用纯 PyTorch 实现，编码/解码块使用 `Conv + GroupNorm + ReLU`
+- `base_channels=32` 时使用 `GroupNorm(num_groups=8)`
+- 三类分割：`0=background`、`1=iris`、`2=pupil`
+- 80 张 Labelme 标注图固定拆分为 `64 train / 16 val`，seed=42
+- 仅对 train 做同步增强：水平翻转、垂直翻转、旋转 ±30°、亮度/对比度 jitter
+- 损失函数采用 `CrossEntropy + Dice`
+
+### 椭圆拟合与展开
+
+- 对 `pupil` 和 `iris` 的最大连通域分别执行 `cv2.fitEllipse`
+- 若椭圆拟合失败或连通域过小，则该样本记为 `failed`
+- `mask_confidence` 定义为 iris/pupil 区域对应 softmax 概率的均值
+- 默认阈值先取 `0.7`，低于该值直接记为 `failed`
+
+椭圆展开时，对每个角度 `θ` 先计算边界半径：
 
 ```python
-CANNY_LOW = 50
-CANNY_HIGH = 150
-HOUGH_DP = 1
-HOUGH_MIN_DIST = 20
-HOUGH_PARAM1 = 50   # Canny高阈值
-HOUGH_PARAM2 = 30   # 累加器阈值（越小越多圆，越大越严格）
-R_INNER_RANGE = (0.10, 0.25)   # 内圆半径/图像宽度
-R_OUTER_RANGE = (0.30, 0.50)   # 外圆半径/图像宽度
+r(θ) = ab / sqrt((b·cosθ)^2 + (a·sinθ)^2)
 ```
 
+其中 `pupil` 和 `iris` 椭圆各算一次，得到 `r_pupil(θ)` 与 `r_iris(θ)`，再在 `[r_pupil(θ), r_iris(θ)]` 之间做 64 步径向插值，最终 remap 成 64×512 灰度图。
+
 ### 验收标准
-- 成功率 ≥ 70%（相对于 eye_crops 数量）
-- 抽样 20 张可视化确认纹理展开正确（生成 `outputs/iris_normalized/samples_vis.png`）
+- 训练集和验证集的输入尺寸、通道数、归一化方式完全一致
+- val 集能输出稳定的 iris / pupil 分割结果，并能完成椭圆拟合
+- 抽样 10 张确认 `image -> mask -> ellipse -> normalized png` 流程正确
+- 生成 `outputs/iris_normalized/samples_vis.png` 便于人工检查
+- `normalize_meta.csv` 中要明确区分 `success` / `failed`，并记录 `mask_confidence`
 
 ---
 
@@ -317,7 +341,7 @@ R_OUTER_RANGE = (0.30, 0.50)   # 外圆半径/图像宽度
 
 **src/stage1_data/rebuild_pairs.py**
 - 读取 `outputs/iris_normalized/normalize_meta.csv`，取 status=success 的全部 img_id（全量可用集）
-- 读取 `data/datasetXGN/relations.csv`（无 header，names=['blood_id','img_id']），过滤到全量可用集
+- 读取 `data/extracted/datasetXGN/relations.csv`（无 header，names=['blood_id','img_id']），过滤到全量可用集
 - 用全量成功归一化图片重建正/负样本对（逻辑同 build_pairs.py）
 - **覆盖写入** `data/pairs_train.csv` 和 `data/pairs_val.csv`
 
@@ -325,6 +349,7 @@ R_OUTER_RANGE = (0.30, 0.50)   # 外圆半径/图像宽度
 
 ### 验收标准
 - `data/pairs_train.csv` 正样本对数量明显多于 Stage 1 版本
+- 构建时只使用 `outputs/iris_normalized/normalize_meta.csv` 中 `status=success` 的样本
 
 ---
 
@@ -438,11 +463,11 @@ def process_image(img_bytes):
         iris_img = img.convert("RGB").resize((128, 128))
 
     # 情况二：眼部特写（接近方形或圆形，如截图里那种虹膜特写）
-    # 直接走 Hough 定位+归一化
+    # 直接走 U-Net 分割 + 椭圆拟合 + 归一化
     elif 0.5 < w / h < 2.0:
-        iris_arr = iris_localize_and_normalize(np.array(img.convert("L")))
-        if iris_arr is None:
-            raise ValueError("虹膜定位失败，请上传清晰的眼部图像")
+        iris_arr, meta = iris_segment_and_normalize(np.array(img.convert("L")))
+        if iris_arr is None or meta["status"] != "success":
+            raise ValueError("虹膜分割失败，请上传清晰的眼部图像")
         iris_img = Image.fromarray(iris_arr).convert("RGB").resize((128, 128))
 
     # 情况三：原始全图（含鸽身背景），先走 YOLO 检测裁剪眼部，再走情况二
@@ -451,9 +476,9 @@ def process_image(img_bytes):
         if bbox is None:
             raise ValueError("未检测到眼部区域，请上传包含眼睛的鸽子图像")
         eye_crop = img.crop(bbox)
-        iris_arr = iris_localize_and_normalize(np.array(eye_crop.convert("L")))
-        if iris_arr is None:
-            raise ValueError("虹膜定位失败")
+        iris_arr, meta = iris_segment_and_normalize(np.array(eye_crop.convert("L")))
+        if iris_arr is None or meta["status"] != "success":
+            raise ValueError("虹膜分割失败")
         iris_img = Image.fromarray(iris_arr).convert("RGB").resize((128, 128))
 
     return encoder(ToTensor(Normalize(iris_img)))
@@ -536,6 +561,7 @@ gunicorn
 2. **blood.csv 已弃用**：不要在新脚本中引用 blood.csv，其数据已全部包含在 relations.csv 中。
 3. **标注噪声**：只保留 `label == "eye"`，过滤 "mouse" 和 "900"。
 4. **图片查找**：所有脚本通过 `outputs/img_index.csv` 查找图片路径，禁止硬编码子目录。
-5. **MobileNetV2 输入**：预训练模型需要 3 通道 RGB，归一化后的灰度虹膜图需 `img.convert('RGB')` 再 resize 到 128×128。
-6. **FAISS 向量**：存入前确保已 L2 归一化（此时 L2 距离 ≡ 余弦距离）。
-7. **阶段依赖**：Stage 3 依赖 Stage 2 输出；Stage 4 依赖 Stage 3 输出；Stage 5 依赖 Stage 4 输出。Stage 1 最优先执行。
+5. **UNet 输入**：Stage 3 的训练和推理必须统一为 `256×256`、1 通道灰度、`GroupNorm(num_groups=8)`。
+6. **MobileNetV2 输入**：预训练模型需要 3 通道 RGB，归一化后的灰度虹膜图需 `img.convert('RGB')` 再 resize 到 128×128。
+7. **FAISS 向量**：存入前确保已 L2 归一化（此时 L2 距离 ≡ 余弦距离）。
+8. **阶段依赖**：Stage 3 依赖 Stage 2 输出和 `data/unet_labelme_80/` 标注集；Stage 3.5 依赖 Stage 3 输出；Stage 4 依赖 Stage 3.5 输出。Stage 1 最优先执行。

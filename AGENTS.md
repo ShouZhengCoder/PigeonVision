@@ -19,17 +19,20 @@ Full spec: read `ROADMAP.md` before writing any code.
 | Path | Content |
 |------|---------|
 | `data/extracted/{1..12}/` | Raw pigeon eye images, `{img_id}.jpg` directly inside each numbered dir |
-| `data/datasetXGN/anotations/` | 9,979 JSON annotation files (eye bounding boxes) |
-| `data/datasetXGN/relations.csv` | 250,207 (blood_id, img_id) pairs — **no header row**, use `header=None, names=['blood_id','img_id']`; primary source for pair building |
-| `data/datasetXGN/blood.csv` | **DEPRECATED** — wide-format bloodline table; all data is a subset of relations.csv; do not use in new scripts |
-| `data/datasetXGN/pigeon.csv` | 113,844 records with ID, PG_ID, BLOOD, EYE fields |
-| `data/datasetXGN/img_list.txt` | 31,900 image IDs, one per line |
+| `data/extracted/datasetXGN/anotations/` | 9,979 JSON annotation files (eye bounding boxes) |
+| `data/extracted/datasetXGN/relations.csv` | 250,207 (blood_id, img_id) pairs — **no header row**, use `header=None, names=['blood_id','img_id']`; primary source for pair building |
+| `data/extracted/datasetXGN/blood.csv` | **DEPRECATED** — wide-format bloodline table; all data is a subset of relations.csv; do not use in new scripts |
+| `data/extracted/datasetXGN/pigeon.csv` | 113,844 records with ID, PG_ID, BLOOD, EYE fields |
+| `data/extracted/datasetXGN/img_list.txt` | 31,900 image IDs, one per line |
+| `data/unet_labelme_80/` | 80 manually labeled iris samples for U-Net v1 |
 | `outputs/img_index.csv` | **Built in Stage 1**: img_id → absolute file path (all scripts use this) |
 | `outputs/eye_crops/` | Eye region crops from YOLO inference |
 | `outputs/iris_normalized/` | 64×512 normalized iris images |
 | `outputs/features/` | Feature vectors + FAISS index |
 | `checkpoints/detection/` | YOLOv5 weights |
+| `checkpoints/segmentation/` | U-Net weights |
 | `checkpoints/siamese/` | Siamese encoder weights |
+| `configs/unet.yaml` | U-Net training config |
 | `configs/` | Training configs (YAML) |
 | `src/stage{1..6}_*/` | Source code per stage |
 
@@ -59,8 +62,8 @@ Update this section as stages complete:
 
 - [ ] Stage 1 — Data prep (`outputs/img_index.csv`, `data/yolo_dataset/`, `data/pairs_*.csv`)
 - [ ] Stage 2 — Eye detection (`checkpoints/detection/best.pt`, `outputs/eye_crops/`)
-- [ ] Stage 3 — Iris normalization (`outputs/iris_normalized/`)
-- [ ] Stage 3.5 — Rebuild pairs (`data/pairs_train.csv` rebuilt from full iris_normalized set)
+- [x] Stage 3 — Iris segmentation + normalization (`outputs/iris_normalized/`)
+- [x] Stage 3.5 — Rebuild pairs (`data/pairs_train.csv` rebuilt from full iris_normalized set)
 - [ ] Stage 4 — Siamese training (`checkpoints/siamese/best.pt`, `outputs/features/`)
 - [ ] Stage 5 — Flask server (`src/stage5_server/app.py`)
 - [ ] Stage 6 — Android deploy (`src/stage6_android/`)
@@ -68,9 +71,10 @@ Update this section as stages complete:
 ## Critical Rules
 
 1. Stage 3.5 (rebuild_pairs) MUST run before Stage 4 training
-2. build_db.py MUST cross-reference normalize_meta.csv (status=success) before extracting features
-3. convert_annotations.py MUST skip images absent from img_index.csv and report count
-4. All batch scripts MUST support --resume to skip already-processed items
+2. Stage 3 training/inference MUST use the same `256x256`, 1-channel UNet setting with `GroupNorm(num_groups=8)` when `base_c=32`
+3. build_db.py MUST cross-reference normalize_meta.csv (status=success) before extracting features
+4. convert_annotations.py MUST skip images absent from img_index.csv and report count
+5. All batch scripts MUST support --resume to skip already-processed items
 
 ## Git Conventions
 
@@ -87,7 +91,7 @@ Update this section as stages complete:
 
 示例：
 - `feat(stage1): 数据整理脚本，图片索引、YOLO标注转换、样本对构建`
-- `fix(stage3): 修复 HoughCircles 参数导致成功率过低的问题`
+- `fix(stage3): 替换为 U-Net 分割 + 椭圆展开，修复归一化成功率过低的问题`
 - `docs: 更新 ROADMAP.md 阶段三说明`
 
 **不应进入 git 的文件**（.gitignore 已配置）：

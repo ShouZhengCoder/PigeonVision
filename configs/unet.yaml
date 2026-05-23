@@ -1,0 +1,16 @@
+input_size: 256
+in_channels: 1
+num_classes: 3
+base_channels: 32
+num_groups: 8
+batch_size: 8
+lr: 0.0003
+epochs: 80
+train_ratio: 0.8
+rotate_degrees: 30.0
+brightness_jitter: 0.2
+contrast_jitter: 0.2
+flip_prob: 0.5
+checkpoint_dir: checkpoints/segmentation
+images_dir: data/unet_labelme_80/images
+masks_dir: data/unet_labelme_80/masks

@@ -1,192 +1,213 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 import cv2
 import numpy as np
+import torch
+
+from _common import ROOT, resolve_root_path
+from unet_common import (
+    DEFAULT_MASK_CONFIDENCE,
+    IMAGE_SIZE,
+    NORMALIZED_SHAPE,
+    EllipseSpec,
+    PredictionResult,
+    build_unet,
+    compute_mask_confidence,
+    ellipse_to_cv2,
+    fit_ellipse_from_mask,
+    gray_to_tensor,
+    normalize_iris_from_ellipses,
+    overlay_mask,
+    resize_gray_image,
+)
 
 
-CANNY_LOW = 50
-CANNY_HIGH = 150
-HOUGH_DP = 1
-HOUGH_MIN_DIST = 20
-HOUGH_PARAM1 = 50
-HOUGH_PARAM2 = 30
-R_INNER_RANGE = (0.10, 0.25)
-R_OUTER_RANGE = (0.30, 0.50)
-DETECT_MAX_SIDE = 256
+DEFAULT_CHECKPOINT = ROOT / "checkpoints" / "segmentation" / "best.pt"
 
 
-@dataclass(frozen=True)
-class Circle:
-    cx: float
-    cy: float
-    r: float
+class UNetPredictor:
+    def __init__(
+        self,
+        checkpoint_path: Path | str | None = None,
+        device: str | torch.device | None = None,
+        input_size: int = IMAGE_SIZE,
+        in_channels: int = 1,
+        num_classes: int = 3,
+        base_channels: int = 32,
+        num_groups: int = 8,
+    ) -> None:
+        self.checkpoint_path = resolve_root_path(checkpoint_path or DEFAULT_CHECKPOINT)
+        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.input_size = int(input_size)
+        self.in_channels = int(in_channels)
+        if self.in_channels != 1:
+            raise ValueError("Stage 3 v1 uses grayscale 1-channel input only")
+        self.num_classes = int(num_classes)
+        self.base_channels = int(base_channels)
+        self.num_groups = int(num_groups)
+
+        self.model = build_unet(
+            in_channels=self.in_channels,
+            num_classes=self.num_classes,
+            base_channels=self.base_channels,
+            num_groups=self.num_groups,
+        ).to(self.device)
+        self._load_weights()
+        self.model.eval()
+
+    def _load_weights(self) -> None:
+        if not self.checkpoint_path.exists():
+            raise FileNotFoundError(f"Missing segmentation checkpoint: {self.checkpoint_path}")
+        state = torch.load(self.checkpoint_path, map_location=self.device)
+        if isinstance(state, dict):
+            for key in ("model_state", "state_dict", "model"):
+                if key in state:
+                    self.model.load_state_dict(state[key])
+                    return
+        if isinstance(state, dict):
+            self.model.load_state_dict(state)
+            return
+        raise ValueError(f"Unsupported checkpoint format: {self.checkpoint_path}")
+
+    @torch.no_grad()
+    def predict(self, image_bgr: np.ndarray, mask_confidence_threshold: float = DEFAULT_MASK_CONFIDENCE) -> PredictionResult:
+        source_height, source_width = image_bgr.shape[:2]
+        image_gray = resize_gray_image(image_bgr, self.input_size)
+        tensor = gray_to_tensor(image_gray).unsqueeze(0).to(self.device)
+        logits = self.model(tensor)
+        probs = torch.softmax(logits, dim=1)[0].detach().cpu().numpy()
+        pred_mask = probs.argmax(axis=0).astype(np.uint8)
+        mask_confidence = compute_mask_confidence(probs, pred_mask)
+
+        pupil_ellipse: EllipseSpec | None = None
+        iris_ellipse: EllipseSpec | None = None
+        reason = "ok"
+
+        pupil_mask = (pred_mask == 2).astype(np.uint8)
+        iris_mask = (pred_mask == 1).astype(np.uint8)
+
+        pupil_ellipse = fit_ellipse_from_mask(pupil_mask, label="pupil")
+        if pupil_ellipse is None:
+            reason = "pupil ellipse fit failed"
+
+        iris_ellipse = fit_ellipse_from_mask(iris_mask, label="iris")
+        if iris_ellipse is None and reason == "ok":
+            reason = "iris ellipse fit failed"
+
+        if pupil_ellipse is not None and iris_ellipse is not None:
+            center_distance = float(
+                ((pupil_ellipse.cx - iris_ellipse.cx) ** 2 + (pupil_ellipse.cy - iris_ellipse.cy) ** 2) ** 0.5
+            )
+            radius_scale = max(float(iris_ellipse.a), float(iris_ellipse.b), 1.0)
+            if center_distance > max(20.0, 0.25 * radius_scale):
+                reason = "ellipse centers too far apart"
+
+            if iris_ellipse.equivalent_radius() <= pupil_ellipse.equivalent_radius():
+                reason = "iris ellipse is not outside pupil ellipse"
+
+        if mask_confidence < mask_confidence_threshold and reason == "ok":
+            reason = f"mask confidence below threshold ({mask_confidence:.4f} < {mask_confidence_threshold:.4f})"
+
+        success = reason == "ok" and pupil_ellipse is not None and iris_ellipse is not None
+        if success:
+            center_x = int(round((pupil_ellipse.cx + iris_ellipse.cx) / 2.0))
+            center_y = int(round((pupil_ellipse.cy + iris_ellipse.cy) / 2.0))
+            inner_radius = int(round(pupil_ellipse.equivalent_radius()))
+            outer_radius = int(round(iris_ellipse.equivalent_radius()))
+        else:
+            center_x = center_y = inner_radius = outer_radius = -1
+
+        return PredictionResult(
+            success=success,
+            status="success" if success else "failed",
+            reason=reason,
+            mask_confidence=float(mask_confidence),
+            source_width=int(source_width),
+            source_height=int(source_height),
+            input_size=int(self.input_size),
+            cx=center_x,
+            cy=center_y,
+            r_inner=inner_radius,
+            r_outer=outer_radius,
+            pupil=pupil_ellipse,
+            iris=iris_ellipse,
+            mask=pred_mask,
+        )
 
 
-def _to_gray(img_bgr: np.ndarray) -> np.ndarray:
-    if img_bgr.ndim == 2:
-        return img_bgr
-    return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-
-def _blur_gray(img_bgr: np.ndarray) -> np.ndarray:
-    return cv2.GaussianBlur(_to_gray(img_bgr), (5, 5), 0)
-
-
-def _estimate_center(gray_blur: np.ndarray) -> tuple[int, int]:
-    vertical = gray_blur.mean(axis=0)
-    horizontal = gray_blur.mean(axis=1)
-    return int(np.argmin(vertical)), int(np.argmin(horizontal))
-
-
-def _downscale_for_detection(gray: np.ndarray) -> tuple[np.ndarray, float]:
-    height, width = gray.shape[:2]
-    max_side = max(height, width)
-    if max_side <= DETECT_MAX_SIDE:
-        return gray, 1.0
-    scale = DETECT_MAX_SIDE / float(max_side)
-    resized = cv2.resize(
-        gray,
-        (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
-        interpolation=cv2.INTER_AREA,
+@lru_cache(maxsize=4)
+def get_default_predictor(
+    checkpoint_path: str = str(DEFAULT_CHECKPOINT),
+    device: str | None = None,
+    input_size: int = IMAGE_SIZE,
+    in_channels: int = 1,
+    num_classes: int = 3,
+    base_channels: int = 32,
+    num_groups: int = 8,
+) -> UNetPredictor:
+    return UNetPredictor(
+        checkpoint_path=Path(checkpoint_path),
+        device=device,
+        input_size=input_size,
+        in_channels=in_channels,
+        num_classes=num_classes,
+        base_channels=base_channels,
+        num_groups=num_groups,
     )
-    return resized, scale
 
 
-def _roi_bounds(width: int, height: int, cx: int, cy: int, radius: int) -> tuple[int, int, int, int]:
-    radius = max(1, radius)
-    x1 = max(0, cx - radius)
-    y1 = max(0, cy - radius)
-    x2 = min(width, cx + radius)
-    y2 = min(height, cy + radius)
-    return x1, y1, x2, y2
-
-
-def _circles_from_hough(img: np.ndarray, r_min: int, r_max: int) -> list[Circle]:
-    if r_min <= 0 or r_max <= 0 or r_min >= r_max:
-        return []
-    circles = cv2.HoughCircles(
-        img,
-        cv2.HOUGH_GRADIENT,
-        dp=HOUGH_DP,
-        minDist=HOUGH_MIN_DIST,
-        param1=HOUGH_PARAM1,
-        param2=HOUGH_PARAM2,
-        minRadius=int(r_min),
-        maxRadius=int(r_max),
-    )
-    if circles is None:
-        return []
-    return [Circle(float(c[0]), float(c[1]), float(c[2])) for c in circles[0]]
-
-
-def _detect_circle(gray: np.ndarray, center_hint: tuple[int, int], r_min: int, r_max: int) -> Circle | None:
-    height, width = gray.shape[:2]
-    cx_hint, cy_hint = center_hint
-    roi_radius = int(max(r_max * 1.6, min(width, height) * 0.45))
-    x1, y1, x2, y2 = _roi_bounds(width, height, cx_hint, cy_hint, roi_radius)
-    roi = gray[y1:y2, x1:x2]
-    if roi.size == 0:
-        return None
-    edges = cv2.Canny(roi, CANNY_LOW, CANNY_HIGH)
-    circles = _circles_from_hough(edges, r_min, r_max)
-    if not circles:
-        circles = _circles_from_hough(roi, r_min, r_max)
-    if not circles:
-        return None
-    best = min(
-        circles,
-        key=lambda c: ((c.cx + x1) - cx_hint) ** 2 + ((c.cy + y1) - cy_hint) ** 2,
-    )
-    return Circle(best.cx + x1, best.cy + y1, best.r)
-
-
-def _fallback_circle(center_hint: tuple[int, int], width: int, kind: str) -> Circle:
-    cx, cy = center_hint
-    radius = int(round(width * (0.18 if kind == "inner" else 0.40)))
-    return Circle(float(cx), float(cy), float(radius))
-
-
-def localize_iris(img_bgr: np.ndarray) -> tuple[int, int, int, int] | None:
-    gray_blur = _blur_gray(img_bgr)
-    height, width = gray_blur.shape[:2]
-    if min(height, width) < 20:
-        return None
-
-    detect_gray, scale = _downscale_for_detection(gray_blur)
-    cx_hint, cy_hint = _estimate_center(detect_gray)
-    scaled_width = detect_gray.shape[1]
-    inner_min = max(1, int(round(scaled_width * R_INNER_RANGE[0])))
-    inner_max = max(inner_min + 1, int(round(scaled_width * R_INNER_RANGE[1])))
-    outer_min = max(inner_max + 1, int(round(scaled_width * R_OUTER_RANGE[0])))
-    outer_max = max(outer_min + 1, int(round(scaled_width * R_OUTER_RANGE[1])))
-
-    inner = _detect_circle(detect_gray, (cx_hint, cy_hint), inner_min, inner_max)
-    outer = _detect_circle(detect_gray, (cx_hint, cy_hint), outer_min, outer_max)
-    if inner is None:
-        inner = _fallback_circle((cx_hint, cy_hint), scaled_width, "inner")
-    if outer is None:
-        outer = _fallback_circle((cx_hint, cy_hint), scaled_width, "outer")
-
-    if scale != 1.0:
-        inv = 1.0 / scale
-        inner = Circle(inner.cx * inv, inner.cy * inv, inner.r * inv)
-        outer = Circle(outer.cx * inv, outer.cy * inv, outer.r * inv)
-
-    cx = int(round((inner.cx + outer.cx) / 2.0))
-    cy = int(round((inner.cy + outer.cy) / 2.0))
-    r_inner = int(round(inner.r))
-    r_outer = int(round(outer.r))
-    if r_inner <= 0 or r_outer <= 0 or r_outer <= r_inner:
-        return None
-    return cx, cy, r_inner, r_outer
+def localize_iris(
+    img_bgr: np.ndarray,
+    predictor: UNetPredictor | None = None,
+    mask_confidence_threshold: float = DEFAULT_MASK_CONFIDENCE,
+) -> PredictionResult:
+    predictor = predictor or get_default_predictor()
+    return predictor.predict(img_bgr, mask_confidence_threshold=mask_confidence_threshold)
 
 
 def normalize_iris(
     img_bgr: np.ndarray,
-    cx: int,
-    cy: int,
-    r_inner: int,
-    r_outer: int,
-    shape: tuple[int, int] = (64, 512),
+    prediction_or_pupil: PredictionResult | EllipseSpec,
+    iris: EllipseSpec | None = None,
+    shape: tuple[int, int] = NORMALIZED_SHAPE,
 ) -> np.ndarray:
-    gray = _to_gray(img_bgr)
-    if r_outer <= r_inner:
-        raise ValueError("r_outer must be greater than r_inner")
+    if isinstance(prediction_or_pupil, PredictionResult):
+        prediction = prediction_or_pupil
+        if not prediction.success or prediction.pupil is None or prediction.iris is None:
+            raise ValueError(prediction.reason)
+        pupil = prediction.pupil
+        iris = prediction.iris
+        input_size = prediction.input_size
+    else:
+        pupil = prediction_or_pupil
+        if iris is None:
+            raise ValueError("iris ellipse is required")
+        input_size = IMAGE_SIZE
 
-    radial_steps, angular_steps = shape
-    theta = np.linspace(0.0, 2.0 * np.pi, angular_steps, endpoint=False, dtype=np.float32)
-    radial = np.linspace(0.0, 1.0, radial_steps, dtype=np.float32)[:, None]
-    radii = (float(r_inner) + radial * float(r_outer - r_inner)).astype(np.float32)
-
-    cos_theta = np.cos(theta).astype(np.float32)[None, :]
-    sin_theta = np.sin(theta).astype(np.float32)[None, :]
-
-    map_x = cx + radii * cos_theta
-    map_y = cy + radii * sin_theta
-    return cv2.remap(
-        gray,
-        map_x.astype(np.float32),
-        map_y.astype(np.float32),
-        interpolation=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_REFLECT_101,
-    )
+    image_gray = resize_gray_image(img_bgr, input_size)
+    return normalize_iris_from_ellipses(image_gray, pupil, iris, shape=shape)
 
 
 def visualize_localization(
     img_bgr: np.ndarray,
-    cx: int,
-    cy: int,
-    r_inner: int,
-    r_outer: int,
+    prediction: PredictionResult,
 ) -> np.ndarray:
-    if img_bgr.ndim == 2:
-        canvas = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+    image_gray = resize_gray_image(img_bgr, prediction.input_size)
+    if prediction.mask is None:
+        canvas = cv2.cvtColor(image_gray, cv2.COLOR_GRAY2BGR)
     else:
-        canvas = img_bgr.copy()
-    cv2.circle(canvas, (int(cx), int(cy)), int(r_inner), (0, 255, 0), 2)
-    cv2.circle(canvas, (int(cx), int(cy)), int(r_outer), (0, 0, 255), 2)
-    cv2.circle(canvas, (int(cx), int(cy)), 2, (255, 0, 0), -1)
-    return canvas
+        canvas = overlay_mask(image_gray, prediction.mask)
 
+    if prediction.pupil is not None:
+        cv2.ellipse(canvas, ellipse_to_cv2(prediction.pupil), (0, 255, 0), 2)
+    if prediction.iris is not None:
+        cv2.ellipse(canvas, ellipse_to_cv2(prediction.iris), (0, 0, 255), 2)
+
+    text = f"{prediction.status} conf={prediction.mask_confidence:.3f}"
+    if prediction.reason and prediction.reason != "ok":
+        text = f"{text} {prediction.reason}"
+    cv2.putText(canvas, text[:80], (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (30, 30, 30), 1, cv2.LINE_AA)
+    return canvas

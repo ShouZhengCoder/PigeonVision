@@ -31,12 +31,6 @@ def parse_args() -> argparse.Namespace:
         help="normalize_meta.csv path.",
     )
     parser.add_argument(
-        "--annotation-dir",
-        type=Path,
-        default=ROOT / "data" / "extracted" / "datasetXGN" / "anotations",
-        help="Annotation directory used to constrain valid images.",
-    )
-    parser.add_argument(
         "--train-output",
         type=Path,
         default=ROOT / "data" / "pairs_train.csv",
@@ -76,20 +70,30 @@ def build_outputs(rows: list[tuple[str, str, int]], train_ratio: float, seed: in
     return train_rows, val_rows
 
 
+def summarize_labels(df: pd.DataFrame) -> dict[str, int]:
+    if df.empty or "label" not in df.columns:
+        return {"positive": 0, "negative": 0, "total": 0}
+    labels = df["label"].astype(int)
+    pos = int((labels == 1).sum())
+    neg = int((labels == 0).sum())
+    return {"positive": pos, "negative": neg, "total": int(len(df))}
+
+
+def load_existing_summary(path: Path) -> dict[str, int]:
+    if not path.exists():
+        return {"positive": 0, "negative": 0, "total": 0}
+    return summarize_labels(pd.read_csv(path))
+
+
 def main() -> int:
     args = parse_args()
     relations = resolve_existing(
         args.relations,
-        ROOT / "data" / "datasetXGN" / "relations.csv",
+        ROOT / "data" / "extracted" / "datasetXGN" / "relations.csv",
     )
     normalize_meta = resolve_existing(
         args.normalize_meta,
         ROOT / "outputs" / "iris_normalized" / "normalize_meta.csv",
-    )
-    annotation_dir = resolve_existing(
-        args.annotation_dir,
-        ROOT / "data" / "datasetXGN" / "anotations",
-        ROOT / "data" / "extracted" / "datasetXGN" / "anotations",
     )
 
     success_ids = set(
@@ -97,12 +101,10 @@ def main() -> int:
         .query("status == 'success'")["img_id"]
         .astype(str)
     )
-    valid_imgs = {p.stem for p in annotation_dir.glob("*.json")}
-    valid_imgs &= success_ids
 
     rel = pd.read_csv(relations, header=None, names=["blood_id", "img_id"])
     rel["img_id"] = rel["img_id"].astype(str)
-    rel = rel[rel["img_id"].isin(valid_imgs)].drop_duplicates(subset=["blood_id", "img_id"])
+    rel = rel[rel["img_id"].isin(success_ids)].drop_duplicates(subset=["blood_id", "img_id"])
 
     blood_to_imgs: dict[str, list[str]] = {}
     img_to_bloods: dict[str, set[str]] = {}
@@ -151,14 +153,39 @@ def main() -> int:
     train_df = pd.DataFrame(train_rows, columns=["img_id_a", "img_id_b", "label"])
     val_df = pd.DataFrame(val_rows, columns=["img_id_a", "img_id_b", "label"])
 
+    old_train_summary = load_existing_summary(args.train_output)
+    old_val_summary = load_existing_summary(args.val_output)
+    old_summary = {
+        "positive": old_train_summary["positive"] + old_val_summary["positive"],
+        "negative": old_train_summary["negative"] + old_val_summary["negative"],
+        "total": old_train_summary["total"] + old_val_summary["total"],
+    }
+
     ensure_dir(args.train_output.parent)
     train_df.to_csv(args.train_output, index=False)
     val_df.to_csv(args.val_output, index=False)
+
+    new_summary = summarize_labels(pd.concat([train_df, val_df], ignore_index=True))
+    delta_positive = new_summary["positive"] - old_summary["positive"]
+    delta_negative = new_summary["negative"] - old_summary["negative"]
+    delta_total = new_summary["total"] - old_summary["total"]
 
     print(f"positive pairs: {len(pos_pairs)}")
     print(f"negative pairs: {len(neg_pairs)}")
     print(f"train rows: {len(train_df)}")
     print(f"val rows: {len(val_df)}")
+    print(
+        "old_summary: "
+        f"positive={old_summary['positive']} negative={old_summary['negative']} total={old_summary['total']}"
+    )
+    print(
+        "new_summary: "
+        f"positive={new_summary['positive']} negative={new_summary['negative']} total={new_summary['total']}"
+    )
+    print(
+        "delta_summary: "
+        f"positive={delta_positive:+d} negative={delta_negative:+d} total={delta_total:+d}"
+    )
     print(f"wrote: {args.train_output}, {args.val_output}")
     return 0
 
