@@ -64,7 +64,7 @@ Update this section as stages complete:
 - [ ] Stage 2 — Eye detection (`checkpoints/detection/best.pt`, `outputs/eye_crops/`)
 - [x] Stage 3 — Iris segmentation + normalization (`outputs/iris_normalized/`)
 - [x] Stage 3.5 — Rebuild pairs (`data/pairs_train.csv` rebuilt from full iris_normalized set)
-- [ ] Stage 4 — Siamese training (`checkpoints/siamese/best.pt`, `outputs/features/`)
+- [x] Stage 4 — Siamese training (`checkpoints/siamese/best.pt`, `outputs/features/`)
 - [ ] Stage 5 — Flask server (`src/stage5_server/app.py`)
 - [ ] Stage 6 — Android deploy (`src/stage6_android/`)
 

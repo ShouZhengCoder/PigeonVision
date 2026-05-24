@@ -183,6 +183,7 @@ def save_checkpoint(
     optimizer: Adam,
     scheduler: CosineAnnealingLR,
     best_val_loss: float,
+    best_epoch: int,
     config: dict,
 ) -> None:
     ensure_dir(path.parent)
@@ -193,6 +194,7 @@ def save_checkpoint(
             "optimizer_state": optimizer.state_dict(),
             "scheduler_state": scheduler.state_dict(),
             "best_val_loss": best_val_loss,
+            "best_epoch": best_epoch,
             "config": config,
         },
         path,
@@ -216,7 +218,7 @@ def main() -> int:
     writer = SummaryWriter(log_dir=str(ROOT / "logs" / "tensorboard" / "siamese"))
 
     transform = default_transform(
-        input_size=int(config["input_size"]),
+        input_shape=config["input_shape"],
         mean=config["normalize_mean"],
         std=config["normalize_std"],
     )
@@ -248,6 +250,9 @@ def main() -> int:
 
     start_epoch = 1
     best_val_loss = float("inf")
+    best_epoch = 0
+    last_val_loss = float("inf")
+    last_epoch = start_epoch - 1
     last_path = checkpoint_dir / "last.pt"
     if args.resume:
         if not last_path.exists():
@@ -257,6 +262,12 @@ def main() -> int:
         optimizer.load_state_dict(state["optimizer_state"])
         scheduler.load_state_dict(state["scheduler_state"])
         best_val_loss = float(state.get("best_val_loss", best_val_loss))
+        best_state_path = checkpoint_dir / "best.pt"
+        if best_state_path.exists():
+            best_state = torch.load(best_state_path, map_location=device)
+            best_epoch = int(best_state.get("epoch", state.get("epoch", 0)))
+        else:
+            best_epoch = int(state.get("best_epoch", state.get("epoch", 0)))
         start_epoch = int(state["epoch"]) + 1
         logger.info("resumed from %s at epoch %s", last_path, start_epoch)
 
@@ -271,8 +282,10 @@ def main() -> int:
     )
 
     for epoch in range(start_epoch, int(config["epochs"]) + 1):
+        last_epoch = epoch
         train_loss = run_epoch(model, train_loader, optimizer, float(config["margin"]), device, f"train {epoch}")
         val_loss = run_epoch(model, val_loader, None, float(config["margin"]), device, f"val {epoch}")
+        last_val_loss = val_loss
         scheduler.step()
 
         writer.add_scalar("loss/train", train_loss, epoch)
@@ -282,11 +295,12 @@ def main() -> int:
         message = f"epoch={epoch} train_loss={train_loss:.6f} val_loss={val_loss:.6f}"
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            save_checkpoint(checkpoint_dir / "best.pt", epoch, model, optimizer, scheduler, best_val_loss, config)
+            best_epoch = epoch
+            save_checkpoint(checkpoint_dir / "best.pt", epoch, model, optimizer, scheduler, best_val_loss, best_epoch, config)
             message += " best=1"
         else:
             message += " best=0"
-        save_checkpoint(last_path, epoch, model, optimizer, scheduler, best_val_loss, config)
+        save_checkpoint(last_path, epoch, model, optimizer, scheduler, best_val_loss, best_epoch, config)
 
         if args.recall_every > 0 and epoch % args.recall_every == 0 and args.limit_val is None:
             recall = recall_at_1(
@@ -304,7 +318,26 @@ def main() -> int:
         logger.info(message)
 
     writer.close()
-    logger.info("training finished best_val_loss=%.6f checkpoint=%s", best_val_loss, checkpoint_dir / "best.pt")
+    best_state = torch.load(checkpoint_dir / "best.pt", map_location=device)
+    model.encoder.load_state_dict(best_state["model_state"])
+    final_recall = recall_at_1(
+        model.encoder,
+        val_csv,
+        iris_dir,
+        transform,
+        device,
+        int(config["batch_size"]),
+        args.num_workers,
+    )
+    logger.info(
+        "training finished actual_epochs=%s final_val_loss=%.6f best_epoch=%s best_val_loss=%.6f recall_at_1=%.6f checkpoint=%s",
+        last_epoch,
+        last_val_loss,
+        best_epoch,
+        best_val_loss,
+        final_recall,
+        checkpoint_dir / "best.pt",
+    )
     return 0
 
 

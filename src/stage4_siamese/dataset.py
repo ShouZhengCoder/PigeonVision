@@ -10,13 +10,14 @@ from torchvision import transforms
 
 
 def default_transform(
-    input_size: int = 128,
+    input_shape: tuple[int, int] | list[int] = (64, 512),
     mean: list[float] | tuple[float, float, float] = (0.5, 0.5, 0.5),
     std: list[float] | tuple[float, float, float] = (0.5, 0.5, 0.5),
 ):
+    height, width = int(input_shape[0]), int(input_shape[1])
     return transforms.Compose(
         [
-            transforms.Resize((input_size, input_size)),
+            transforms.Resize((height, width)),
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std),
         ]

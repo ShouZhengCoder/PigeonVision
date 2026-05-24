@@ -5,7 +5,7 @@ lr: 0.001
 epochs: 100
 optimizer: adam
 scheduler: cosine
-input_size: 128
+input_shape: [64, 512]
 normalize_mean: [0.5, 0.5, 0.5]
 normalize_std: [0.5, 0.5, 0.5]
 checkpoint_dir: checkpoints/siamese/

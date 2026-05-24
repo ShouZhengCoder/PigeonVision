@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "siamese.yaml")
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--normalize-meta", type=Path, default=ROOT / "outputs" / "iris_normalized" / "normalize_meta.csv")
-    parser.add_argument("--pigeon-csv", type=Path, default=ROOT / "data" / "datasetXGN" / "pigeon.csv")
+    parser.add_argument("--pigeon-csv", type=Path, default=ROOT / "data" / "extracted" / "datasetXGN" / "pigeon.csv")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs" / "features")
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--num-workers", type=int, default=4)
@@ -133,7 +133,7 @@ def main() -> int:
         raise RuntimeError("No eligible images for feature database.")
 
     transform = default_transform(
-        input_size=int(config["input_size"]),
+        input_shape=config["input_shape"],
         mean=config["normalize_mean"],
         std=config["normalize_std"],
     )
