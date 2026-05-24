@@ -303,6 +303,23 @@ def normalize_iris_from_ellipses(
     if image_gray.dtype != np.uint8:
         image_gray = np.clip(image_gray, 0, 255).astype(np.uint8)
 
+    map_x, map_y = iris_remap_maps(pupil, iris, shape=shape, center=center)
+    normalized = cv2.remap(
+        image_gray,
+        map_x,
+        map_y,
+        interpolation=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT_101,
+    )
+    return normalized
+
+
+def iris_remap_maps(
+    pupil: EllipseSpec,
+    iris: EllipseSpec,
+    shape: tuple[int, int] = NORMALIZED_SHAPE,
+    center: tuple[float, float] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     if center is None:
         cx = (float(pupil.cx) + float(iris.cx)) / 2.0
         cy = (float(pupil.cy) + float(iris.cy)) / 2.0
@@ -321,10 +338,26 @@ def normalize_iris_from_ellipses(
     radii = pupil_r[None, :] + radial * (iris_r - pupil_r)[None, :]
     map_x = cx + radii * np.cos(theta)[None, :]
     map_y = cy + radii * np.sin(theta)[None, :]
+    return map_x.astype(np.float32), map_y.astype(np.float32)
+
+
+def normalize_iris_color_from_ellipses(
+    image_bgr: np.ndarray,
+    pupil: EllipseSpec,
+    iris: EllipseSpec,
+    shape: tuple[int, int] = NORMALIZED_SHAPE,
+    center: tuple[float, float] | None = None,
+) -> np.ndarray:
+    if image_bgr.ndim == 2:
+        image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_GRAY2BGR)
+    if image_bgr.dtype != np.uint8:
+        image_bgr = np.clip(image_bgr, 0, 255).astype(np.uint8)
+
+    map_x, map_y = iris_remap_maps(pupil, iris, shape=shape, center=center)
     normalized = cv2.remap(
-        image_gray,
-        map_x.astype(np.float32),
-        map_y.astype(np.float32),
+        image_bgr,
+        map_x,
+        map_y,
         interpolation=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_REFLECT_101,
     )
@@ -380,4 +413,3 @@ def build_unet(
         base_channels=base_channels,
         num_groups=num_groups,
     )
-

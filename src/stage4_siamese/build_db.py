@@ -8,12 +8,11 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from _common import ROOT, ensure_dir, resolve_existing, resolve_root_path
-from dataset import default_transform
+from dataset import default_transform, load_blood_rows, load_rgb_image
 from model import IrisEncoder
 
 
@@ -29,9 +28,8 @@ class IrisDbDataset(Dataset):
     def __getitem__(self, index: int):
         row = self.rows.iloc[index]
         img_id = str(row["img_id"])
-        with Image.open(self.img_dir / f"{img_id}.png") as image:
-            image = image.convert("RGB")
-            return img_id, self.transform(image)
+        image = load_rgb_image(self.img_dir / f"{img_id}.png")
+        return img_id, self.transform(image)
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,8 +51,8 @@ def load_config(path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-def load_encoder(checkpoint_path: Path, feat_dim: int, device: torch.device) -> IrisEncoder:
-    encoder = IrisEncoder(feat_dim=feat_dim, pretrained=False).to(device)
+def load_encoder(checkpoint_path: Path, feat_dim: int, backbone: str, device: torch.device) -> IrisEncoder:
+    encoder = IrisEncoder(feat_dim=feat_dim, backbone=backbone, pretrained=False, in_channels=3).to(device)
     state = torch.load(checkpoint_path, map_location=device)
     model_state = state["model_state"] if isinstance(state, dict) and "model_state" in state else state
     encoder.load_state_dict(model_state)
@@ -62,31 +60,17 @@ def load_encoder(checkpoint_path: Path, feat_dim: int, device: torch.device) -> 
     return encoder
 
 
-def select_db_rows(normalize_meta: Path, pigeon_csv: Path, img_dir: Path) -> pd.DataFrame:
-    normalize_df = pd.read_csv(normalize_meta, dtype={"img_id": str})
-    success_ids = set(normalize_df[normalize_df["status"] == "success"]["img_id"].astype(str))
-
-    try:
-        pigeon_df = pd.read_csv(pigeon_csv, dtype={"ID": str})
-    except pd.errors.ParserError:
-        pigeon_df = pd.read_csv(pigeon_csv, dtype={"ID": str}, engine="python", on_bad_lines="skip")
-        print(f"warning: skipped malformed rows while reading {pigeon_csv}")
-    pigeon_df["ID"] = pigeon_df["ID"].astype(str)
-    pigeon_df["BLOOD"] = pigeon_df["BLOOD"].fillna("").astype(str).str.strip()
-    pigeon_df = pigeon_df[pigeon_df["BLOOD"] != ""]
-
-    blood_counts = pigeon_df["BLOOD"].value_counts()
-    keep_bloods = set(blood_counts[blood_counts >= 50].index)
-    pigeon_df = pigeon_df[pigeon_df["BLOOD"].isin(keep_bloods)]
-    pigeon_df = pigeon_df[pigeon_df["ID"].isin(success_ids)]
-    pigeon_df = pigeon_df[pigeon_df["ID"].map(lambda img_id: (img_dir / f"{img_id}.png").exists())]
-
-    rows = pd.DataFrame(
-        {
-            "img_id": pigeon_df["ID"].astype(str),
-            "pg_id": pigeon_df["PG_ID"].fillna("").astype(str),
-            "blood": pigeon_df["BLOOD"].astype(str),
-        }
+def select_db_rows(
+    normalize_meta: Path,
+    pigeon_csv: Path,
+    img_dir: Path,
+    min_images_per_blood: int,
+) -> pd.DataFrame:
+    rows = load_blood_rows(
+        normalize_meta=normalize_meta,
+        pigeon_csv=pigeon_csv,
+        img_dir=img_dir,
+        min_images_per_blood=min_images_per_blood,
     )
     return rows.drop_duplicates(subset=["img_id"]).sort_values("img_id").reset_index(drop=True)
 
@@ -109,7 +93,7 @@ def extract_features(
         feats = encoder(images).detach().cpu().numpy().astype("float32")
         features.append(feats)
     if not features:
-        return np.empty((0, encoder.fc.out_features), dtype="float32")
+        return np.empty((0, encoder.feat_dim), dtype="float32")
     return np.concatenate(features, axis=0).astype("float32")
 
 
@@ -126,7 +110,12 @@ def main() -> int:
     img_dir = resolve_root_path(config["iris_dir"])
     output_dir = ensure_dir(resolve_root_path(args.output_dir))
 
-    rows = select_db_rows(normalize_meta, pigeon_csv, img_dir)
+    rows = select_db_rows(
+        normalize_meta=normalize_meta,
+        pigeon_csv=pigeon_csv,
+        img_dir=img_dir,
+        min_images_per_blood=int(config.get("min_db_images_per_blood", 20)),
+    )
     if args.limit is not None:
         rows = rows.head(args.limit).copy()
     if rows.empty:
@@ -134,10 +123,16 @@ def main() -> int:
 
     transform = default_transform(
         input_shape=config["input_shape"],
-        mean=config["normalize_mean"],
-        std=config["normalize_std"],
+        mean=config.get("normalize_mean", [0.5, 0.5, 0.5]),
+        std=config.get("normalize_std", [0.5, 0.5, 0.5]),
+        train=False,
     )
-    encoder = load_encoder(checkpoint_path, int(config["feat_dim"]), device)
+    encoder = load_encoder(
+        checkpoint_path,
+        int(config.get("feat_dim", 256)),
+        str(config.get("backbone", "resnet18")),
+        device,
+    )
     features = extract_features(encoder, rows, img_dir, transform, device, args.batch_size, args.num_workers)
 
     feature_path = output_dir / "feature_db.npy"
@@ -146,7 +141,7 @@ def main() -> int:
 
     np.save(feature_path, features)
     rows.to_csv(meta_path, index=False)
-    index = faiss.IndexFlatL2(int(config["feat_dim"]))
+    index = faiss.IndexFlatL2(int(config.get("feat_dim", 256)))
     index.add(features)
     faiss.write_index(index, str(index_path))
 

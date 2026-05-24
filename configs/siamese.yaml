@@ -1,8 +1,15 @@
-feat_dim: 128
-margin: 1.0
+feat_dim: 256
+backbone: resnet34
+in_channels: 3
+arcface_scale: 30.0
+arcface_margin: 0.20
+arcface_subcenters: 3
+label_smoothing: 0.05
+warmup_epochs: 3
+smoke_gate_epoch: 5
 batch_size: 64
-lr: 0.001
-epochs: 100
+lr: 0.0003
+epochs: 80
 optimizer: adam
 scheduler: cosine
 input_shape: [64, 512]
@@ -10,5 +17,15 @@ normalize_mean: [0.5, 0.5, 0.5]
 normalize_std: [0.5, 0.5, 0.5]
 checkpoint_dir: checkpoints/siamese/
 iris_dir: outputs/iris_normalized/
+normalize_meta: outputs/iris_normalized/normalize_meta.csv
+pigeon_csv: data/extracted/datasetXGN/pigeon.csv
+min_images_per_blood: 5
+min_db_images_per_blood: 20
+val_ratio: 0.2
+seed: 42
+classes_per_batch: 16
+samples_per_class: 4
+batches_per_epoch: 0
+compare_eval_pairs: 200000
 pairs_train: data/pairs_train.csv
 pairs_val: data/pairs_val.csv

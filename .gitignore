@@ -5,6 +5,7 @@ data/raw_from_teacher/*.zip
 # 生成的中间产物（可由代码重新生成）
 outputs/eye_crops/*.jpg
 outputs/iris_normalized/*.png
+outputs/iris_extracted/*.png
 
 # 模型权重（体积大，用训练脚本重现）
 checkpoints/

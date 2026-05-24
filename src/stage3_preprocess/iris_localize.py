@@ -19,6 +19,7 @@ from unet_common import (
     ellipse_to_cv2,
     fit_ellipse_from_mask,
     gray_to_tensor,
+    normalize_iris_color_from_ellipses,
     normalize_iris_from_ellipses,
     overlay_mask,
     resize_gray_image,
@@ -189,6 +190,65 @@ def normalize_iris(
 
     image_gray = resize_gray_image(img_bgr, input_size)
     return normalize_iris_from_ellipses(image_gray, pupil, iris, shape=shape)
+
+
+def daugman_normalize_color(
+    img_bgr: np.ndarray,
+    prediction_or_pupil: PredictionResult | EllipseSpec,
+    iris: EllipseSpec | None = None,
+    shape: tuple[int, int] = NORMALIZED_SHAPE,
+) -> np.ndarray:
+    if isinstance(prediction_or_pupil, PredictionResult):
+        prediction = prediction_or_pupil
+        if not prediction.success or prediction.pupil is None or prediction.iris is None:
+            raise ValueError(prediction.reason)
+        pupil = prediction.pupil
+        iris = prediction.iris
+        input_size = prediction.input_size
+    else:
+        pupil = prediction_or_pupil
+        if iris is None:
+            raise ValueError("iris ellipse is required")
+        input_size = IMAGE_SIZE
+
+    if img_bgr.ndim == 2:
+        image_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+    else:
+        image_bgr = img_bgr
+    image_bgr = cv2.resize(image_bgr, (int(input_size), int(input_size)), interpolation=cv2.INTER_AREA)
+    return normalize_iris_color_from_ellipses(image_bgr, pupil, iris, shape=shape)
+
+
+def extract_iris_region(
+    img_bgr: np.ndarray,
+    prediction_or_iris: PredictionResult | EllipseSpec,
+    input_size: int = IMAGE_SIZE,
+) -> np.ndarray:
+    if isinstance(prediction_or_iris, PredictionResult):
+        prediction = prediction_or_iris
+        if not prediction.success or prediction.iris is None:
+            raise ValueError(prediction.reason)
+        iris = prediction.iris
+        input_size = prediction.input_size
+    else:
+        iris = prediction_or_iris
+
+    if img_bgr.ndim == 2:
+        image_gray = img_bgr
+    else:
+        image_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+    mask_small = np.zeros((int(input_size), int(input_size)), dtype=np.uint8)
+    cv2.ellipse(mask_small, ellipse_to_cv2(iris), 255, thickness=-1)
+    mask = cv2.resize(
+        mask_small,
+        (int(image_gray.shape[1]), int(image_gray.shape[0])),
+        interpolation=cv2.INTER_NEAREST,
+    )
+
+    extracted = np.zeros_like(image_gray)
+    extracted[mask > 0] = image_gray[mask > 0]
+    return extracted
 
 
 def visualize_localization(

@@ -103,7 +103,7 @@ def main() -> int:
     for row in sampled.itertuples(index=False):
         img_id = str(row.img_id)
         crop = load_image(crop_dir / f"{img_id}.jpg", grayscale=False)
-        norm = load_image(normalized_dir / f"{img_id}.png", grayscale=True)
+        norm = load_image(normalized_dir / f"{img_id}.png", grayscale=False)
         panels.append(make_panel(crop, norm, img_id))
 
     cols = 4 if len(panels) >= 4 else len(panels)
@@ -125,4 +125,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
