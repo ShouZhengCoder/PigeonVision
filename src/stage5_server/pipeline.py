@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
+from ultralytics import YOLO
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,16 +31,20 @@ class IrisPipeline:
     def __init__(
         self,
         siamese_checkpoint: str | Path = ROOT / "checkpoints" / "siamese" / "best.pt",
+        detection_checkpoint: str | Path = ROOT / "checkpoints" / "detection" / "exp" / "weights" / "best.pt",
         segmentation_checkpoint: str | Path = ROOT / "checkpoints" / "segmentation" / "best.pt",
         faiss_index_path: str | Path = ROOT / "outputs" / "features" / "faiss_index.bin",
         feature_meta_path: str | Path = ROOT / "outputs" / "features" / "feature_db_meta.csv",
         threshold_path: str | Path = ROOT / "outputs" / "features" / "threshold.json",
         siamese_config_path: str | Path = ROOT / "configs" / "siamese.yaml",
         unet_config_path: str | Path = ROOT / "configs" / "unet.yaml",
+        detection_confidence: float = 0.7,
+        detection_expand_ratio: float = 0.1,
         device: str | torch.device | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.siamese_checkpoint = self._resolve(siamese_checkpoint)
+        self.detection_checkpoint = self._resolve(detection_checkpoint)
         self.segmentation_checkpoint = self._resolve(segmentation_checkpoint)
         self.faiss_index_path = self._resolve(faiss_index_path)
         self.feature_meta_path = self._resolve(feature_meta_path)
@@ -49,7 +54,10 @@ class IrisPipeline:
 
         self.siamese_config = self._load_yaml(self.siamese_config_path)
         self.unet_config = self._load_yaml(self.unet_config_path)
+        self.detection_confidence = float(detection_confidence)
+        self.detection_expand_ratio = float(detection_expand_ratio)
         self.threshold = self._load_threshold(self.threshold_path)
+        self.detector = self._load_detector()
         self.encoder = self._load_encoder()
         self.segmenter = self._load_segmenter()
         self.index = self._load_faiss_index()
@@ -76,23 +84,7 @@ class IrisPipeline:
 
     def encode(self, img_bytes: bytes) -> np.ndarray:
         image_bgr = self._decode_image(img_bytes)
-        prediction = self.segmenter.predict(
-            image_bgr,
-            mask_confidence_threshold=float(DEFAULT_MASK_CONFIDENCE),
-        )
-        if not prediction.success:
-            raise ValueError(f"虹膜分割失败：{prediction.reason}")
-        if prediction.mask_confidence < float(DEFAULT_MASK_CONFIDENCE):
-            raise ValueError(
-                f"虹膜分割失败：mask_confidence={prediction.mask_confidence:.4f} "
-                f"低于阈值 {float(DEFAULT_MASK_CONFIDENCE):.4f}"
-            )
-
-        try:
-            normalized_bgr = daugman_normalize_color(image_bgr, prediction, shape=NORMALIZED_SHAPE)
-        except Exception as exc:
-            raise ValueError(f"虹膜展开失败：{exc}") from exc
-
+        normalized_bgr = self._prepare_normalized_iris(image_bgr)
         tensor = self._normalized_bgr_to_tensor(normalized_bgr).to(self.device)
         with torch.no_grad():
             embedding = self.encoder(tensor).detach().cpu().numpy()[0].astype(np.float32)
@@ -100,6 +92,72 @@ class IrisPipeline:
         if norm <= 1e-12:
             raise ValueError("编码失败：embedding 范数为 0")
         return (embedding / norm).astype(np.float32)
+
+    def _prepare_normalized_iris(self, image_bgr: np.ndarray) -> np.ndarray:
+        height, width = image_bgr.shape[:2]
+        if height > 0 and width / height >= 4.0:
+            return image_bgr
+
+        eye_bgr = self._detect_eye_crop(image_bgr)
+        return self._segment_and_normalize(eye_bgr)
+
+    def _segment_and_normalize(self, eye_bgr: np.ndarray) -> np.ndarray:
+        prediction = self.segmenter.predict(
+            eye_bgr,
+            mask_confidence_threshold=float(DEFAULT_MASK_CONFIDENCE),
+        )
+        if not prediction.success:
+            raise ValueError(
+                f"虹膜分割失败：{prediction.reason}。请上传清晰的眼部特写，"
+                "或直接上传 64×512 的归一化虹膜图。"
+            )
+        if prediction.mask_confidence < float(DEFAULT_MASK_CONFIDENCE):
+            raise ValueError(
+                f"虹膜分割失败：mask_confidence={prediction.mask_confidence:.4f} "
+                f"低于阈值 {float(DEFAULT_MASK_CONFIDENCE):.4f}。请上传清晰的眼部特写。"
+            )
+
+        try:
+            return daugman_normalize_color(eye_bgr, prediction, shape=NORMALIZED_SHAPE)
+        except Exception as exc:
+            raise ValueError(f"虹膜展开失败：{exc}") from exc
+
+    def _detect_eye_crop(self, image_bgr: np.ndarray) -> np.ndarray:
+        results = self.detector.predict(
+            source=image_bgr,
+            conf=self.detection_confidence,
+            verbose=False,
+            device=self._ultralytics_device(),
+        )
+        if not results:
+            return image_bgr
+        boxes = results[0].boxes
+        if boxes is None or len(boxes) == 0:
+            return image_bgr
+
+        best_index = -1
+        best_conf = -1.0
+        for idx in range(len(boxes)):
+            conf = float(boxes.conf[idx].item())
+            if conf >= self.detection_confidence and conf > best_conf:
+                best_conf = conf
+                best_index = idx
+        if best_index < 0:
+            return image_bgr
+
+        x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[best_index].tolist()]
+        image_height, image_width = image_bgr.shape[:2]
+        box_width = x2 - x1
+        box_height = y2 - y1
+        pad_x = box_width * self.detection_expand_ratio
+        pad_y = box_height * self.detection_expand_ratio
+        ex1 = max(0, int(round(x1 - pad_x)))
+        ey1 = max(0, int(round(y1 - pad_y)))
+        ex2 = min(image_width, int(round(x2 + pad_x)))
+        ey2 = min(image_height, int(round(y2 + pad_y)))
+        if ex2 <= ex1 or ey2 <= ey1:
+            raise ValueError("眼部检测失败：检测框无效")
+        return image_bgr[ey1:ey2, ex1:ex2].copy()
 
     def compare(self, img_bytes_a: bytes, img_bytes_b: bytes) -> dict[str, Any]:
         feat_a = self.encode(img_bytes_a)
@@ -148,6 +206,20 @@ class IrisPipeline:
         encoder.load_state_dict(model_state)
         encoder.eval()
         return encoder
+
+    def _load_detector(self) -> YOLO:
+        checkpoint = self.detection_checkpoint
+        if not checkpoint.exists():
+            candidates = sorted(
+                (ROOT / "checkpoints" / "detection").rglob("best.pt"),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+            if not candidates:
+                raise FileNotFoundError(f"缺少 YOLO 眼部检测权重：{checkpoint}")
+            checkpoint = candidates[0]
+            self.detection_checkpoint = checkpoint
+        return YOLO(str(checkpoint))
 
     def _load_segmenter(self) -> UNetPredictor:
         if not self.segmentation_checkpoint.exists():
@@ -229,3 +301,8 @@ class IrisPipeline:
         if "threshold" not in payload:
             raise ValueError(f"{path} 缺少 threshold 字段")
         return float(payload["threshold"])
+
+    def _ultralytics_device(self) -> int | str:
+        if self.device.type != "cuda":
+            return "cpu"
+        return int(self.device.index) if self.device.index is not None else 0
