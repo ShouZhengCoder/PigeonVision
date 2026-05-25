@@ -57,6 +57,15 @@ def compare():
 
 @app.post("/search")
 def search():
+    return _search_from_request()
+
+
+@app.post("/search_raw")
+def search_raw():
+    return _search_from_request()
+
+
+def _search_from_request():
     image = request.files.get("image")
     if image is None:
         raise ValueError("请上传 image")

@@ -405,6 +405,7 @@
     <nav class="tabs" aria-label="mode">
       <button class="tab active" type="button" data-tab="compare">品种比对</button>
       <button class="tab" type="button" data-tab="search">品种检索</button>
+      <button class="tab" type="button" data-tab="raw">原图检索</button>
     </nav>
 
     <section class="panel active" id="panel-compare">
@@ -474,6 +475,37 @@
         </div>
       </aside>
     </section>
+
+    <section class="panel" id="panel-raw">
+      <div class="workspace">
+        <div class="upload-grid single">
+          <div class="uploader">
+            <label>
+              原图
+              <input id="raw-image" type="file" accept="image/*">
+            </label>
+            <div class="preview" id="preview-raw">
+              <img alt="">
+              <span class="empty">未选择</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="controls">
+          <label class="field">
+            <span>Top K</span>
+            <input id="raw-top-k" type="number" min="1" max="50" value="10">
+          </label>
+          <button class="action" id="raw-btn" type="button">检索原图</button>
+        </div>
+        <div class="result-box" id="raw-result">
+          <p class="result-title">结果</p>
+          <div class="status">等待检索</div>
+        </div>
+      </aside>
+    </section>
   </main>
 
   <script>
@@ -481,6 +513,7 @@
       compareA: null,
       compareB: null,
       searchImage: null,
+      rawImage: null,
     };
 
     document.querySelectorAll(".tab").forEach((tab) => {
@@ -539,6 +572,7 @@
     bindPreview("compare-a", "preview-a", "compareA");
     bindPreview("compare-b", "preview-b", "compareB");
     bindPreview("search-image", "preview-search", "searchImage");
+    bindPreview("raw-image", "preview-raw", "rawImage");
 
     document.getElementById("compare-btn").addEventListener("click", async () => {
       const target = document.getElementById("compare-result");
@@ -601,6 +635,41 @@
         renderError(target, error.message);
       } finally {
         setLoading(button, false, "检索");
+      }
+    });
+
+    document.getElementById("raw-btn").addEventListener("click", async () => {
+      const target = document.getElementById("raw-result");
+      const button = document.getElementById("raw-btn");
+      if (!state.rawImage) {
+        renderError(target, "请先选择图片");
+        return;
+      }
+      const form = new FormData();
+      form.append("image", state.rawImage);
+      form.append("top_k", document.getElementById("raw-top-k").value || "10");
+      setLoading(button, true, "检索原图");
+      target.innerHTML = `<p class="result-title">结果</p><div class="status">处理中</div>`;
+      try {
+        const response = await fetch("/search_raw", { method: "POST", body: form });
+        if (!response.ok) throw new Error(await readError(response));
+        const payload = await response.json();
+        const rows = payload.results || [];
+        const items = rows.map((item) => `
+          <li class="result-row">
+            <span class="rank">#${item.rank}</span>
+            <span>
+              <span class="breed">${escapeHtml(item.blood_name || "")}</span>
+              <span class="sub">${escapeHtml(item.blood_id || "")}${item.pg_id ? " · " + escapeHtml(item.pg_id) : ""}</span>
+            </span>
+            <span class="distance">${Number(item.distance).toFixed(5)}</span>
+          </li>
+        `).join("");
+        target.innerHTML = `<p class="result-title">结果</p><ol class="results">${items}</ol>`;
+      } catch (error) {
+        renderError(target, error.message);
+      } finally {
+        setLoading(button, false, "检索原图");
       }
     });
 
