@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PigeonVision</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --ink: #18202b;
+      --muted: #667085;
+      --line: #d8dde5;
+      --accent: #0f766e;
+      --accent-dark: #0b5f59;
+      --danger: #b42318;
+      --ok: #067647;
+      --shadow: 0 16px 40px rgba(24, 32, 43, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .app {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 4px 0 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .health {
+      display: flex;
+      gap: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .health strong {
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin: 24px 0;
+      padding: 4px;
+      width: fit-content;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #eef1f5;
+    }
+
+    .tab {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 14px;
+      font-weight: 650;
+      cursor: pointer;
+      transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .tab.active {
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: 0 2px 8px rgba(24, 32, 43, 0.08);
+    }
+
+    .panel {
+      display: none;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .panel.active {
+      display: grid;
+    }
+
+    .workspace {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .upload-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0;
+    }
+
+    .upload-grid.single {
+      grid-template-columns: 1fr;
+    }
+
+    .uploader {
+      min-height: 380px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      border-right: 1px solid var(--line);
+    }
+
+    .uploader:last-child {
+      border-right: 0;
+    }
+
+    .uploader label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    input[type="file"] {
+      max-width: 170px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .preview {
+      position: relative;
+      min-height: 320px;
+      background:
+        linear-gradient(90deg, rgba(24, 32, 43, 0.05) 1px, transparent 1px),
+        linear-gradient(rgba(24, 32, 43, 0.05) 1px, transparent 1px);
+      background-size: 28px 28px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+      background: #111827;
+    }
+
+    .preview.has-image img {
+      display: block;
+    }
+
+    .empty {
+      color: #98a2b3;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .preview.has-image .empty {
+      display: none;
+    }
+
+    .side {
+      display: grid;
+      gap: 16px;
+    }
+
+    .controls,
+    .result-box {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .field span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    input[type="number"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 11px 12px;
+      color: var(--ink);
+      font-size: 15px;
+      background: #fff;
+    }
+
+    button.action {
+      width: 100%;
+      min-height: 44px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 750;
+      cursor: pointer;
+      transition: background 160ms ease, transform 160ms ease;
+    }
+
+    button.action:hover {
+      background: var(--accent-dark);
+      transform: translateY(-1px);
+    }
+
+    button.action:disabled {
+      cursor: wait;
+      opacity: 0.64;
+      transform: none;
+    }
+
+    .result-box {
+      min-height: 160px;
+    }
+
+    .result-title {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .metric {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric:last-child {
+      border-bottom: 0;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .metric strong {
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 750;
+      background: #ecfdf3;
+      color: var(--ok);
+    }
+
+    .badge.no {
+      background: #fef3f2;
+      color: var(--danger);
+    }
+
+    .status {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .status.error {
+      color: var(--danger);
+    }
+
+    .results {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .result-row {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .result-row:last-child {
+      border-bottom: 0;
+    }
+
+    .rank {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .breed {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    .sub {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .distance {
+      font-variant-numeric: tabular-nums;
+      font-weight: 750;
+    }
+
+    @media (max-width: 880px) {
+      .app {
+        width: min(100vw - 20px, 680px);
+        padding-top: 18px;
+      }
+
+      header {
+        display: grid;
+        align-items: start;
+      }
+
+      .health {
+        flex-wrap: wrap;
+        white-space: normal;
+      }
+
+      .panel.active {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .upload-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .uploader {
+        min-height: 300px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .uploader:last-child {
+        border-bottom: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>PigeonVision</h1>
+      <div class="health" id="health">
+        <span>图库 <strong>--</strong></span>
+        <span>品系 <strong>--</strong></span>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="mode">
+      <button class="tab active" type="button" data-tab="compare">品种比对</button>
+      <button class="tab" type="button" data-tab="search">品种检索</button>
+    </nav>
+
+    <section class="panel active" id="panel-compare">
+      <div class="workspace">
+        <div class="upload-grid">
+          <div class="uploader">
+            <label>
+              图片 A
+              <input id="compare-a" type="file" accept="image/*">
+            </label>
+            <div class="preview" id="preview-a">
+              <img alt="">
+              <span class="empty">未选择</span>
+            </div>
+          </div>
+          <div class="uploader">
+            <label>
+              图片 B
+              <input id="compare-b" type="file" accept="image/*">
+            </label>
+            <div class="preview" id="preview-b">
+              <img alt="">
+              <span class="empty">未选择</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="controls">
+          <button class="action" id="compare-btn" type="button">比对</button>
+        </div>
+        <div class="result-box" id="compare-result">
+          <p class="result-title">结果</p>
+          <div class="status">等待比对</div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="panel" id="panel-search">
+      <div class="workspace">
+        <div class="upload-grid single">
+          <div class="uploader">
+            <label>
+              图片
+              <input id="search-image" type="file" accept="image/*">
+            </label>
+            <div class="preview" id="preview-search">
+              <img alt="">
+              <span class="empty">未选择</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="controls">
+          <label class="field">
+            <span>Top K</span>
+            <input id="top-k" type="number" min="1" max="50" value="10">
+          </label>
+          <button class="action" id="search-btn" type="button">检索</button>
+        </div>
+        <div class="result-box" id="search-result">
+          <p class="result-title">结果</p>
+          <div class="status">等待检索</div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      compareA: null,
+      compareB: null,
+      searchImage: null,
+    };
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((item) => item.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById(`panel-${tab.dataset.tab}`).classList.add("active");
+      });
+    });
+
+    function bindPreview(inputId, previewId, stateKey) {
+      const input = document.getElementById(inputId);
+      const preview = document.getElementById(previewId);
+      const image = preview.querySelector("img");
+      input.addEventListener("change", () => {
+        const file = input.files && input.files[0] ? input.files[0] : null;
+        state[stateKey] = file;
+        if (!file) {
+          preview.classList.remove("has-image");
+          image.removeAttribute("src");
+          return;
+        }
+        image.src = URL.createObjectURL(file);
+        preview.classList.add("has-image");
+      });
+    }
+
+    function setLoading(button, isLoading, label) {
+      button.disabled = isLoading;
+      button.textContent = isLoading ? "处理中" : label;
+    }
+
+    function renderError(target, message) {
+      target.innerHTML = `<p class="result-title">结果</p><div class="status error">${escapeHtml(message)}</div>`;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    async function readError(response) {
+      try {
+        const payload = await response.json();
+        return payload.error || `HTTP ${response.status}`;
+      } catch (_) {
+        return `HTTP ${response.status}`;
+      }
+    }
+
+    bindPreview("compare-a", "preview-a", "compareA");
+    bindPreview("compare-b", "preview-b", "compareB");
+    bindPreview("search-image", "preview-search", "searchImage");
+
+    document.getElementById("compare-btn").addEventListener("click", async () => {
+      const target = document.getElementById("compare-result");
+      const button = document.getElementById("compare-btn");
+      if (!state.compareA || !state.compareB) {
+        renderError(target, "请先选择两张图片");
+        return;
+      }
+      const form = new FormData();
+      form.append("image_a", state.compareA);
+      form.append("image_b", state.compareB);
+      setLoading(button, true, "比对");
+      target.innerHTML = `<p class="result-title">结果</p><div class="status">处理中</div>`;
+      try {
+        const response = await fetch("/compare", { method: "POST", body: form });
+        if (!response.ok) throw new Error(await readError(response));
+        const result = await response.json();
+        target.innerHTML = `
+          <p class="result-title">结果</p>
+          <div class="metric"><span>距离</span><strong>${Number(result.distance).toFixed(6)}</strong></div>
+          <div class="metric"><span>阈值</span><strong>${Number(result.threshold).toFixed(6)}</strong></div>
+          <div class="metric"><span>判断</span><b class="badge ${result.same_family ? "" : "no"}">${result.same_family ? "同一家族" : "不同家族"}</b></div>
+        `;
+      } catch (error) {
+        renderError(target, error.message);
+      } finally {
+        setLoading(button, false, "比对");
+      }
+    });
+
+    document.getElementById("search-btn").addEventListener("click", async () => {
+      const target = document.getElementById("search-result");
+      const button = document.getElementById("search-btn");
+      if (!state.searchImage) {
+        renderError(target, "请先选择图片");
+        return;
+      }
+      const form = new FormData();
+      form.append("image", state.searchImage);
+      form.append("top_k", document.getElementById("top-k").value || "10");
+      setLoading(button, true, "检索");
+      target.innerHTML = `<p class="result-title">结果</p><div class="status">处理中</div>`;
+      try {
+        const response = await fetch("/search", { method: "POST", body: form });
+        if (!response.ok) throw new Error(await readError(response));
+        const payload = await response.json();
+        const rows = payload.results || [];
+        const items = rows.map((item) => `
+          <li class="result-row">
+            <span class="rank">#${item.rank}</span>
+            <span>
+              <span class="breed">${escapeHtml(item.blood_name || "")}</span>
+              <span class="sub">${escapeHtml(item.blood_id || "")}${item.pg_id ? " · " + escapeHtml(item.pg_id) : ""}</span>
+            </span>
+            <span class="distance">${Number(item.distance).toFixed(5)}</span>
+          </li>
+        `).join("");
+        target.innerHTML = `<p class="result-title">结果</p><ol class="results">${items}</ol>`;
+      } catch (error) {
+        renderError(target, error.message);
+      } finally {
+        setLoading(button, false, "检索");
+      }
+    });
+
+    fetch("/health")
+      .then((response) => response.json())
+      .then((payload) => {
+        document.getElementById("health").innerHTML = `
+          <span>图库 <strong>${payload.gallery_size}</strong></span>
+          <span>品系 <strong>${payload.breed_count}</strong></span>
+        `;
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>
