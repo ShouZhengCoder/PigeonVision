@@ -100,6 +100,38 @@ def load_rgb_image(path: str | Path) -> Image.Image:
     return Image.fromarray(image_rgb)
 
 
+def load_triplet_meta(path: str | Path) -> pd.DataFrame:
+    path = Path(path)
+    df = pd.read_csv(path, dtype={"img_id": str, "blood_id": str, "blood_name": str})
+    required = {"img_id", "blood_id", "blood_name"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"{path} missing columns: {sorted(missing)}")
+    df = df[["img_id", "blood_id", "blood_name"]].copy()
+    df["img_id"] = df["img_id"].astype(str)
+    df["blood_id"] = df["blood_id"].astype(str)
+    df["blood_name"] = df["blood_name"].fillna("").astype(str).str.strip()
+    df = df[df["blood_name"] != ""].drop_duplicates(subset=["img_id", "blood_id", "blood_name"])
+    return df.sort_values(["blood_name", "blood_id", "img_id"]).reset_index(drop=True)
+
+
+def build_triplet_label_maps(*frames: pd.DataFrame) -> tuple[dict[str, int], dict[str, int]]:
+    blood_ids = sorted({str(value) for frame in frames for value in frame["blood_id"].astype(str).unique()})
+    blood_names = sorted({str(value) for frame in frames for value in frame["blood_name"].astype(str).unique()})
+    return ({value: idx for idx, value in enumerate(blood_ids)}, {value: idx for idx, value in enumerate(blood_names)})
+
+
+def add_triplet_label_columns(
+    df: pd.DataFrame,
+    blood_id_to_label: dict[str, int],
+    blood_name_to_label: dict[str, int],
+) -> pd.DataFrame:
+    out = df.copy()
+    out["blood_id_label"] = out["blood_id"].astype(str).map(blood_id_to_label).astype(int)
+    out["blood_name_label"] = out["blood_name"].astype(str).map(blood_name_to_label).astype(int)
+    return out
+
+
 def load_blood_rows(
     normalize_meta: str | Path,
     pigeon_csv: str | Path,
@@ -181,6 +213,44 @@ class IrisClassDataset(Dataset):
         return img_id, tensor, torch.tensor(int(row["label"]), dtype=torch.long)
 
 
+class TripletMetaDataset(Dataset):
+    """Dataset for batch-hard triplet learning.
+
+    Positive rule: same `blood_id`.
+    Negative rule: different `blood_name`.
+    Same `blood_name` with different `blood_id` is deliberately skipped as a negative.
+    """
+
+    def __init__(
+        self,
+        rows: pd.DataFrame,
+        img_dir: str | Path,
+        transform=None,
+    ) -> None:
+        self.rows = rows.reset_index(drop=True)
+        self.img_dir = Path(img_dir)
+        self.transform = transform if transform is not None else default_transform(train=False)
+        required = {"img_id", "blood_id", "blood_name", "blood_id_label", "blood_name_label"}
+        missing = required - set(self.rows.columns)
+        if missing:
+            raise ValueError(f"TripletMetaDataset rows missing columns: {sorted(missing)}")
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, index: int):
+        row = self.rows.iloc[index]
+        img_id = str(row["img_id"])
+        image = load_rgb_image(self.img_dir / f"{img_id}.png")
+        tensor = self.transform(image)
+        return (
+            img_id,
+            tensor,
+            torch.tensor(int(row["blood_id_label"]), dtype=torch.long),
+            torch.tensor(int(row["blood_name_label"]), dtype=torch.long),
+        )
+
+
 class PKBatchSampler(Sampler[list[int]]):
     def __init__(
         self,
@@ -203,6 +273,62 @@ class PKBatchSampler(Sampler[list[int]]):
             by_label[label].append(index)
         self.by_label = dict(by_label)
         self.unique_labels = sorted(self.by_label)
+
+    def __len__(self) -> int:
+        return self.batches_per_epoch
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __iter__(self) -> Iterator[list[int]]:
+        rng = random.Random(self.seed + self.epoch)
+        for _ in range(self.batches_per_epoch):
+            if len(self.unique_labels) >= self.classes_per_batch:
+                labels = rng.sample(self.unique_labels, self.classes_per_batch)
+            else:
+                labels = [rng.choice(self.unique_labels) for _ in range(self.classes_per_batch)]
+
+            batch: list[int] = []
+            for label in labels:
+                indices = self.by_label[label]
+                replace = len(indices) < self.samples_per_class
+                if replace:
+                    batch.extend(rng.choice(indices) for _ in range(self.samples_per_class))
+                else:
+                    batch.extend(rng.sample(indices, self.samples_per_class))
+            rng.shuffle(batch)
+            yield batch
+
+
+class BloodIdPKSampler(Sampler[list[int]]):
+    def __init__(
+        self,
+        blood_id_labels: list[int] | np.ndarray | pd.Series,
+        classes_per_batch: int = 16,
+        samples_per_class: int = 4,
+        batches_per_epoch: int | None = None,
+        seed: int = 42,
+        min_samples_per_class: int = 2,
+    ) -> None:
+        self.labels = [int(label) for label in blood_id_labels]
+        self.classes_per_batch = int(classes_per_batch)
+        self.samples_per_class = int(samples_per_class)
+        self.batch_size = self.classes_per_batch * self.samples_per_class
+        self.batches_per_epoch = int(batches_per_epoch or math.ceil(len(self.labels) / max(self.batch_size, 1)))
+        self.seed = int(seed)
+        self.epoch = 0
+
+        by_label: dict[int, list[int]] = defaultdict(list)
+        for index, label in enumerate(self.labels):
+            by_label[label].append(index)
+        self.by_label = {
+            label: indices
+            for label, indices in by_label.items()
+            if len(indices) >= int(min_samples_per_class)
+        }
+        self.unique_labels = sorted(self.by_label)
+        if not self.unique_labels:
+            raise ValueError("BloodIdPKSampler requires at least one blood_id with >=2 images")
 
     def __len__(self) -> int:
         return self.batches_per_epoch

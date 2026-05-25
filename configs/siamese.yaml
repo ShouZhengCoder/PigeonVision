@@ -1,10 +1,7 @@
 feat_dim: 256
 backbone: resnet34
 in_channels: 3
-arcface_scale: 30.0
-arcface_margin: 0.20
-arcface_subcenters: 3
-label_smoothing: 0.05
+triplet_margin: 0.3
 warmup_epochs: 3
 smoke_gate_epoch: 5
 batch_size: 64
@@ -19,7 +16,10 @@ checkpoint_dir: checkpoints/siamese/
 iris_dir: outputs/iris_normalized/
 normalize_meta: outputs/iris_normalized/normalize_meta.csv
 pigeon_csv: data/extracted/datasetXGN/pigeon.csv
+train_meta: data/train_meta.csv
+val_meta: data/val_meta.csv
 min_images_per_blood: 5
+min_images_per_blood_id: 2
 min_db_images_per_blood: 20
 val_ratio: 0.2
 seed: 42
