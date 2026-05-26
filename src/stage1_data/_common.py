@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.environ["PIGEONVISION_DATA"]) if "PIGEONVISION_DATA" in os.environ else ROOT
 
 
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def resolve_data_path(path: str | Path) -> Path:
+    """Resolve a data/output/checkpoint path, preferring DATA_ROOT when set."""
+    path = Path(path)
+    if path.is_absolute():
+        return path
+    return DATA_ROOT / path
 

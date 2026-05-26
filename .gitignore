@@ -1,42 +1,44 @@
-# 原始图片（体积太大，不入库）
+# ---- 大文件（托管于 Hugging Face: jshouEX/pigeon-breed-image-dataset） ----
 data/extracted/
-data/raw_from_teacher/*.zip
-
-# 生成的中间产物（可由代码重新生成）
-outputs/eye_crops/*.jpg
-outputs/iris_normalized/*.png
-outputs/iris_extracted/*.png
-
-# 模型权重（体积大，用训练脚本重现）
-checkpoints/
-
-# 大型二进制特征文件
+data/raw_from_teacher/
+data/unet_labelme_80/
+outputs/eye_crops/
+outputs/iris_normalized/
+outputs/iris_extracted/
 outputs/features/*.npy
 outputs/features/*.bin
+checkpoints/
 
-# 训练日志
+# ---- 训练日志 ----
 logs/
 
-# Python 缓存
+# ---- Python 缓存 ----
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
 
-# 编辑器
+# ---- 编辑器 ----
 .vscode/
 .idea/
 *.swp
 
-# 系统文件
+# ---- 系统文件 ----
 .DS_Store
 Thumbs.db
+core
 
-# 虚拟环境
+# ---- 虚拟环境 ----
 venv/
 .env
 
-# YOLOv5 训练产物（含大量图片缓存）
+# ---- YOLOv5 产物 ----
 data/yolo_dataset/labels/
 data/yolo_dataset/train.txt
 data/yolo_dataset/val.txt
+
+# ---- 模型权重文件（不从 HF 获取时可能下到本地） ----
+*.pt
+
+# ---- HF 数据本地克隆目录 ----
+pigeon-breed-image-dataset/

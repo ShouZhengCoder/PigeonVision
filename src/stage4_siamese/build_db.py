@@ -9,13 +9,17 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score, roc_curve
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from _common import ROOT, ensure_dir, resolve_root_path
 from dataset import default_transform, load_rgb_image, load_triplet_meta
 from model import IrisEncoder
+from relation_metrics import (
+    compute_cross_compare_metrics_by_related_breeds,
+    compute_cross_search_metrics_by_related_breeds,
+    load_related_blood_names,
+)
 
 
 class IrisDbDataset(Dataset):
@@ -102,121 +106,6 @@ def extract_features(
     return np.concatenate(features, axis=0).astype("float32")
 
 
-def compute_cross_search_metrics(
-    query_features: np.ndarray,
-    query_labels: np.ndarray,
-    gallery_features: np.ndarray,
-    gallery_labels: np.ndarray,
-) -> dict[str, float]:
-    if len(query_features) == 0 or len(gallery_features) == 0:
-        return {"recall_at_1": 0.0, "recall_at_5": 0.0, "recall_at_10": 0.0, "mAP": 0.0}
-
-    index = faiss.IndexFlatL2(gallery_features.shape[1])
-    index.add(gallery_features.astype("float32"))
-    max_rank = len(gallery_features)
-    recall_hits = {1: 0, 5: 0, 10: 0}
-    aps: list[float] = []
-    valid = 0
-
-    chunk = 256
-    for start in range(0, len(query_features), chunk):
-        end = min(start + chunk, len(query_features))
-        _distances, indices = index.search(query_features[start:end].astype("float32"), max_rank)
-        for local_i, ranked_idx in enumerate(indices):
-            query_label = query_labels[start + local_i]
-            relevant_total = int(np.sum(gallery_labels == query_label))
-            if relevant_total == 0:
-                continue
-            valid += 1
-            ranked_labels = gallery_labels[ranked_idx]
-            relevant = ranked_labels == query_label
-            for k in (1, 5, 10):
-                recall_hits[k] += int(np.any(relevant[: min(k, len(relevant))]))
-            hits = 0
-            precision_sum = 0.0
-            for rank, is_relevant in enumerate(relevant, start=1):
-                if is_relevant:
-                    hits += 1
-                    precision_sum += hits / rank
-            aps.append(precision_sum / max(relevant_total, 1))
-
-    return {
-        "recall_at_1": recall_hits[1] / max(valid, 1),
-        "recall_at_5": recall_hits[5] / max(valid, 1),
-        "recall_at_10": recall_hits[10] / max(valid, 1),
-        "mAP": float(np.mean(aps)) if aps else 0.0,
-    }
-
-
-def compute_cross_compare_metrics(
-    query_features: np.ndarray,
-    query_labels: np.ndarray,
-    gallery_features: np.ndarray,
-    gallery_labels: np.ndarray,
-    max_pairs: int = 200000,
-    seed: int = 42,
-) -> dict[str, float]:
-    rng = np.random.default_rng(seed)
-    label_to_gallery: dict[str, np.ndarray] = {
-        str(label): np.where(gallery_labels == label)[0]
-        for label in np.unique(gallery_labels)
-    }
-    positive_pairs: list[tuple[int, int]] = []
-    query_order = np.arange(len(query_labels))
-    rng.shuffle(query_order)
-    target_pos = max_pairs // 2
-    for query_idx in query_order:
-        candidates = label_to_gallery.get(str(query_labels[query_idx]))
-        if candidates is None or len(candidates) == 0:
-            continue
-        gallery_idx = int(rng.choice(candidates))
-        positive_pairs.append((int(query_idx), gallery_idx))
-        if len(positive_pairs) >= target_pos:
-            break
-
-    negative_pairs: list[tuple[int, int]] = []
-    attempts = 0
-    while len(negative_pairs) < len(positive_pairs) and attempts < max_pairs * 20:
-        attempts += 1
-        query_idx = int(rng.integers(0, len(query_labels)))
-        gallery_idx = int(rng.integers(0, len(gallery_labels)))
-        if query_labels[query_idx] == gallery_labels[gallery_idx]:
-            continue
-        negative_pairs.append((query_idx, gallery_idx))
-
-    pair_n = min(len(positive_pairs), len(negative_pairs))
-    if pair_n == 0:
-        return {"accuracy": 0.0, "balanced_accuracy": 0.0, "auc": 0.0, "eer": 1.0, "threshold": 0.0}
-
-    pairs = positive_pairs[:pair_n] + negative_pairs[:pair_n]
-    y_true = np.asarray([1] * pair_n + [0] * pair_n, dtype=np.int32)
-    dists = np.asarray(
-        [float(np.linalg.norm(query_features[q] - gallery_features[g])) for q, g in pairs],
-        dtype=np.float32,
-    )
-    thresholds = np.unique(np.quantile(dists, np.linspace(0, 1, 256)))
-    best_threshold = float(thresholds[0])
-    best_acc = -1.0
-    best_bal = -1.0
-    for threshold in thresholds:
-        preds = (dists <= threshold).astype(np.int32)
-        acc = accuracy_score(y_true, preds)
-        bal = balanced_accuracy_score(y_true, preds)
-        if bal > best_bal:
-            best_threshold = float(threshold)
-            best_acc = float(acc)
-            best_bal = float(bal)
-    try:
-        auc = float(roc_auc_score(y_true, -dists))
-    except ValueError:
-        auc = 0.0
-    fpr, tpr, _roc_thresholds = roc_curve(y_true, -dists)
-    fnr = 1.0 - tpr
-    eer_idx = int(np.nanargmin(np.abs(fnr - fpr)))
-    eer = float((fpr[eer_idx] + fnr[eer_idx]) / 2.0)
-    return {"accuracy": best_acc, "balanced_accuracy": best_bal, "auc": auc, "eer": eer, "threshold": best_threshold}
-
-
 def save_eval_metrics(output_dir: Path, epoch: int, compare_metrics: dict[str, float], search_metrics: dict[str, float]) -> None:
     payload = {
         "epoch": int(epoch),
@@ -242,6 +131,10 @@ def main() -> int:
     val_meta = resolve_root_path(args.val_meta or config.get("val_meta", ROOT / "data" / "val_meta.csv"))
     output_dir = ensure_dir(resolve_root_path(args.output_dir))
     pigeon_csv = resolve_root_path(config.get("pigeon_csv", ROOT / "data" / "extracted" / "datasetXGN" / "pigeon.csv"))
+    relations_path = resolve_root_path(
+        config.get("relations", ROOT / "data" / "extracted" / "datasetXGN" / "relations.csv")
+    )
+    related_blood_names = load_related_blood_names(relations_path, pigeon_csv)
 
     train_rows = load_triplet_meta(train_meta)
     val_rows = load_triplet_meta(val_meta)
@@ -269,8 +162,10 @@ def main() -> int:
 
     gallery_features = extract_features(encoder, gallery_rows, img_dir, transform, device, args.batch_size, args.num_workers, "extract gallery")
     query_features = extract_features(encoder, query_rows, img_dir, transform, device, args.batch_size, args.num_workers, "extract val queries")
-    gallery_labels = gallery_rows["blood_name"].astype(str).to_numpy()
-    query_labels = query_rows["blood_name"].astype(str).to_numpy()
+    gallery_img_ids = gallery_rows["img_id"].astype(str).tolist()
+    query_img_ids = query_rows["img_id"].astype(str).tolist()
+    gallery_blood_names = gallery_rows["blood_name"].astype(str).tolist()
+    query_blood_names = query_rows["blood_name"].astype(str).tolist()
 
     feature_path = output_dir / "feature_db.npy"
     meta_path = output_dir / "feature_db_meta.csv"
@@ -286,12 +181,21 @@ def main() -> int:
     index.add(gallery_features.astype("float32"))
     faiss.write_index(index, str(index_path))
 
-    search_metrics = compute_cross_search_metrics(query_features, query_labels, gallery_features, gallery_labels)
-    compare_metrics = compute_cross_compare_metrics(
+    search_metrics = compute_cross_search_metrics_by_related_breeds(
         query_features,
-        query_labels,
+        query_img_ids,
         gallery_features,
-        gallery_labels,
+        gallery_blood_names,
+        related_blood_names,
+    )
+    compare_metrics = compute_cross_compare_metrics_by_related_breeds(
+        query_features,
+        query_img_ids,
+        query_blood_names,
+        gallery_features,
+        gallery_img_ids,
+        gallery_blood_names,
+        related_blood_names,
         max_pairs=int(config.get("compare_eval_pairs", 200000)),
         seed=int(config.get("seed", 42)),
     )
