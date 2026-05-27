@@ -55,7 +55,7 @@ PigeonVision/
 │   └── stage5_server/       # Flask 后端服务
 ├── configs/                 # 训练配置文件
 ├── scripts/                 # 工具脚本
-│   ├── setup_data.py        # 从 HF 仓库创建数据/权重符号链接
+│   ├── setup_data.py        # 从 HF 仓库解压 tar 数据包
 │   └── sync_hf.py           # 将本地数据同步到 HF 仓库
 ├── data/                    # 元数据 CSV（大文件在 HF）
 │   ├── pairs_train.csv

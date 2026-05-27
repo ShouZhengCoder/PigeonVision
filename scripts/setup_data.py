@@ -7,34 +7,30 @@ Run this after cloning both repos:
   git clone https://huggingface.co/datasets/jshouEX/pigeon-breed-image-dataset
   python scripts/setup_data.py
 
-This creates symlinks so the project can find data/output/checkpoint files.
-If you prefer to keep the HF clone elsewhere, set PIGEONVISION_DATA env var instead.
+The HF repo contains tar archives that get extracted into the project.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HF_DIR_DEFAULT = ROOT / "pigeon-breed-image-dataset"
 
-LINKS = [
-    # (link_path, target_under_hf)
-    ("data/extracted", "data/extracted"),
-    ("data/unet_labelme_80", "data/unet_labelme_80"),
-    ("outputs/eye_crops", "outputs/eye_crops"),
-    ("outputs/iris_normalized", "outputs/iris_normalized"),
-    ("outputs/features", "outputs/features"),
-    ("checkpoints", "checkpoints"),
+ARCHIVES = [
+    ("data_extracted.tar", "原始鸽眼图 + U-Net 标注"),
+    ("outputs.tar", "眼部裁剪 + 虹膜归一化 + 特征库"),
+    ("checkpoints.tar", "模型权重"),
 ]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Set up data symlinks from HF clone.")
+    parser = argparse.ArgumentParser(description="Set up data from HF tar archives.")
     parser.add_argument("--hf-dir", type=Path, default=HF_DIR_DEFAULT, help="Path to cloned HF dataset repo.")
-    parser.add_argument("--force", action="store_true", help="Overwrite existing symlinks/dirs.")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing data.")
     return parser.parse_args()
 
 
@@ -46,32 +42,22 @@ def main() -> int:
         print(f"请先克隆: git clone https://huggingface.co/datasets/jshouEX/pigeon-breed-image-dataset {hf_dir}")
         return 1
 
-    for link_rel, target_rel in LINKS:
-        link_path = (ROOT / link_rel).resolve()
-        target_path = (hf_dir / target_rel).resolve()
-
-        if not target_path.exists():
-            print(f"[warn] HF 中缺少: {target_rel}，跳过")
+    for archive_name, desc in ARCHIVES:
+        archive_path = hf_dir / archive_name
+        if not archive_path.exists():
+            print(f"[warn] HF 中缺少: {archive_name}，跳过")
             continue
 
-        if link_path.exists() or link_path.is_symlink():
-            if args.force:
-                if link_path.is_symlink():
-                    link_path.unlink()
-                elif link_path.is_dir():
-                    import shutil
-                    shutil.rmtree(link_path)
-            else:
-                print(f"[skip] 已存在: {link_rel}")
-                continue
+        file_size_gb = archive_path.stat().st_size / (1024 ** 3)
+        print(f"[{desc}] 解压 {archive_name} ({file_size_gb:.1f} GB)...")
+        with tarfile.open(archive_path) as tar:
+            tar.extractall(path=ROOT, filter="data")
+        print(f"  完成")
 
-        link_path.parent.mkdir(parents=True, exist_ok=True)
-        link_path.symlink_to(target_path, target_is_directory=target_path.is_dir())
-        print(f"[link] {link_rel} → {target_path}")
-
-    print("\n数据链接已就绪。可通过以下方式验证:")
-    print(f"  ls {ROOT / 'data' / 'extracted'}")
-    print(f"  ls {ROOT / 'checkpoints'}")
+    print("\n数据已就绪。验证:")
+    print(f"  ls {ROOT / 'data' / 'extracted' / '1'}")
+    print(f"  ls {ROOT / 'checkpoints' / 'siamese'}")
+    print(f"  ls {ROOT / 'outputs' / 'iris_normalized'}")
     return 0
 
 
