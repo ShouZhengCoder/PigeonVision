@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
+from typing import Union
 
 import cv2
 import numpy as np
@@ -155,6 +156,12 @@ class EllipseSpec:
     angle_deg: float
     label: str
 
+    def __post_init__(self) -> None:
+        if self.a <= 0 or self.b <= 0:
+            raise ValueError(f"Ellipse half-axes must be positive: a={self.a}, b={self.b}")
+        if not (0 <= self.angle_deg < 180):
+            raise ValueError(f"Ellipse angle must be in [0, 180): {self.angle_deg}")
+
     def equivalent_radius(self) -> float:
         return (self.a + self.b) / 2.0
 
@@ -169,10 +176,7 @@ class EllipseSpec:
 
 
 @dataclass(frozen=True)
-class PredictionResult:
-    success: bool
-    status: str
-    reason: str
+class IrisSegmentationSuccess:
     mask_confidence: float
     source_width: int
     source_height: int
@@ -181,15 +185,15 @@ class PredictionResult:
     cy: int
     r_inner: int
     r_outer: int
-    pupil: EllipseSpec | None
-    iris: EllipseSpec | None
-    mask: np.ndarray | None = None
+    pupil: EllipseSpec
+    iris: EllipseSpec
+    mask: np.ndarray
 
     def to_meta_row(self, img_id: str) -> dict[str, object]:
-        row: dict[str, object] = {
+        return {
             "img_id": img_id,
-            "status": self.status,
-            "reason": self.reason,
+            "status": "success",
+            "reason": "ok",
             "mask_confidence": round(float(self.mask_confidence), 6),
             "source_width": int(self.source_width),
             "source_height": int(self.source_height),
@@ -198,32 +202,53 @@ class PredictionResult:
             "cy": int(self.cy),
             "r_inner": int(self.r_inner),
             "r_outer": int(self.r_outer),
+            **self.pupil.to_dict("pupil"),
+            **self.iris.to_dict("iris"),
+        }
+
+
+@dataclass(frozen=True)
+class IrisSegmentationFailure:
+    reason: str
+    mask_confidence: float
+    source_width: int = -1
+    source_height: int = -1
+    input_size: int = IMAGE_SIZE
+    pupil: EllipseSpec | None = None
+    iris: EllipseSpec | None = None
+
+    def to_meta_row(self, img_id: str) -> dict[str, object]:
+        row: dict[str, object] = {
+            "img_id": img_id,
+            "status": "failed",
+            "reason": self.reason,
+            "mask_confidence": round(float(self.mask_confidence), 6),
+            "source_width": int(self.source_width),
+            "source_height": int(self.source_height),
+            "input_size": int(self.input_size),
+            "cx": -1,
+            "cy": -1,
+            "r_inner": -1,
+            "r_outer": -1,
+            "pupil_cx": -1,
+            "pupil_cy": -1,
+            "pupil_a": -1,
+            "pupil_b": -1,
+            "pupil_angle": -1,
+            "iris_cx": -1,
+            "iris_cy": -1,
+            "iris_a": -1,
+            "iris_b": -1,
+            "iris_angle": -1,
         }
         if self.pupil is not None:
             row.update(self.pupil.to_dict("pupil"))
-        else:
-            row.update(
-                {
-                    "pupil_cx": -1,
-                    "pupil_cy": -1,
-                    "pupil_a": -1,
-                    "pupil_b": -1,
-                    "pupil_angle": -1,
-                }
-            )
         if self.iris is not None:
             row.update(self.iris.to_dict("iris"))
-        else:
-            row.update(
-                {
-                    "iris_cx": -1,
-                    "iris_cy": -1,
-                    "iris_a": -1,
-                    "iris_b": -1,
-                    "iris_angle": -1,
-                }
-            )
         return row
+
+
+PredictionResult = Union[IrisSegmentationSuccess, IrisSegmentationFailure]
 
 
 def _normalize_fit_ellipse(raw_ellipse: tuple[tuple[float, float], tuple[float, float], float], label: str) -> EllipseSpec:

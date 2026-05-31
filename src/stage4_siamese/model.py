@@ -49,14 +49,3 @@ class IrisEncoder(nn.Module):
         x = self.backbone(x)
         x = self.embedding(x)
         return F.normalize(x, p=2, dim=1)
-
-
-class SiameseNet(nn.Module):
-    def __init__(self, encoder: IrisEncoder | None = None) -> None:
-        super().__init__()
-        self.encoder = encoder if encoder is not None else IrisEncoder()
-
-    def forward(self, img_a: torch.Tensor, img_b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        feat_a = self.encoder(img_a)
-        feat_b = self.encoder(img_b)
-        return feat_a, feat_b

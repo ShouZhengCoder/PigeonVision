@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from _common import ROOT, ensure_dir, resolve_root_path
 from iris_localize import UNetPredictor, daugman_normalize_color, extract_iris_region, localize_iris
-from unet_common import DEFAULT_MASK_CONFIDENCE, IMAGE_SIZE, EllipseSpec, PredictionResult
+from unet_common import DEFAULT_MASK_CONFIDENCE, IMAGE_SIZE, EllipseSpec, IrisSegmentationFailure, IrisSegmentationSuccess, PredictionResult
 
 
 FIELDNAMES = [
@@ -315,31 +315,26 @@ def main() -> int:
             mask_confidence_threshold=args.mask_confidence_threshold,
         )
 
-        if prediction.success:
+        if isinstance(prediction, IrisSegmentationSuccess):
             try:
                 normalized = daugman_normalize_color(image, prediction)
             except Exception as exc:
-                prediction = PredictionResult(
-                    success=False,
-                    status="failed",
+                prediction = IrisSegmentationFailure(
                     reason=f"normalize failed: {exc}",
                     mask_confidence=prediction.mask_confidence,
                     source_width=prediction.source_width,
                     source_height=prediction.source_height,
                     input_size=prediction.input_size,
-                    cx=-1,
-                    cy=-1,
-                    r_inner=-1,
-                    r_outer=-1,
                     pupil=prediction.pupil,
                     iris=prediction.iris,
-                    mask=prediction.mask,
                 )
             else:
-                cv2.imwrite(str(output_dir / f"{img_id}.png"), normalized)
+                if not cv2.imwrite(str(output_dir / f"{img_id}.png"), normalized):
+                    raise IOError(f"写入失败: {output_dir / f'{img_id}.png'}")
                 if export_iris_dir is not None:
                     extracted = extract_iris_region(image, prediction)
-                    cv2.imwrite(str(export_iris_dir / f"{img_id}.png"), extracted, PNG_FAST_WRITE)
+                    if not cv2.imwrite(str(export_iris_dir / f"{img_id}.png"), extracted, PNG_FAST_WRITE):
+                        print(f"[warn] 导出虹膜失败: {export_iris_dir / f'{img_id}.png'}", flush=True)
                 success += 1
 
         confidences.append(float(prediction.mask_confidence))

@@ -159,7 +159,11 @@ def main() -> int:
                 x1, y1, x2, y2, conf = expand_bbox(best, w, h, args.expand)
                 if x2 > x1 and y2 > y1:
                     crop = image[y1:y2, x1:x2]
-                    cv2.imwrite(str(output_dir / f"{img_id}.jpg"), crop)
+                    if not cv2.imwrite(str(output_dir / f"{img_id}.jpg"), crop):
+                        print(f"[warn] 写入裁剪图失败: {output_dir / f'{img_id}.jpg'}", flush=True)
+                        rows_buffer.append({"img_id": img_id, "x1": 0, "y1": 0, "x2": 0, "y2": 0, "confidence": 0.0})
+                        processed += 1
+                        continue
                     detected += 1
                     rows_buffer.append(
                         {

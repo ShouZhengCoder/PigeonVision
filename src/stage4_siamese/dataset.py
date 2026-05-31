@@ -4,7 +4,7 @@ import math
 import random
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, NamedTuple
 
 import cv2
 import numpy as np
@@ -13,6 +13,25 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset, Sampler
 from torchvision import transforms
+
+
+class TripletSample(NamedTuple):
+    img_id: str
+    image: torch.Tensor
+    blood_id_label: torch.Tensor
+    blood_name_label: torch.Tensor
+
+
+class ClassSample(NamedTuple):
+    img_id: str
+    image: torch.Tensor
+    label: torch.Tensor
+
+
+class PairSample(NamedTuple):
+    img_a: torch.Tensor
+    img_b: torch.Tensor
+    label: torch.Tensor
 
 
 class RandomHorizontalRoll:
@@ -132,6 +151,38 @@ def add_triplet_label_columns(
     return out
 
 
+def load_multi_label_meta(path: str | Path) -> dict[str, set[int]]:
+    """Load multi-label blood_id info from train_multi_meta.csv.
+
+    Returns: img_id -> set of blood_id integer indices.
+    """
+    import json
+    df = pd.read_csv(Path(path), dtype={"img_id": str})
+    if "blood_id_indices" not in df.columns:
+        raise ValueError(f"{path} missing blood_id_indices column")
+    result: dict[str, set[int]] = {}
+    for row in df.itertuples(index=False):
+        result[str(row.img_id)] = set(json.loads(str(row.blood_id_indices)))
+    return result
+
+
+def build_overlap_matrix(img_ids: list[str], multi_label_map: dict[str, set[int]],
+                         device: torch.device) -> torch.Tensor:
+    """Build (B,B) bool matrix: True if two images share any blood_id."""
+    B = len(img_ids)
+    mask = torch.zeros(B, B, dtype=torch.bool, device=device)
+    sets = [multi_label_map.get(str(i), set()) for i in img_ids]
+    for i in range(B):
+        si = sets[i]
+        if not si:
+            continue
+        for j in range(i + 1, B):
+            if si & sets[j]:
+                mask[i, j] = True
+                mask[j, i] = True
+    return mask
+
+
 def load_blood_rows(
     normalize_meta: str | Path,
     pigeon_csv: str | Path,
@@ -210,7 +261,11 @@ class IrisClassDataset(Dataset):
         img_id = str(row["img_id"])
         image = load_rgb_image(self.img_dir / f"{img_id}.png")
         tensor = self.transform(image)
-        return img_id, tensor, torch.tensor(int(row["label"]), dtype=torch.long)
+        return ClassSample(
+            img_id=img_id,
+            image=tensor,
+            label=torch.tensor(int(row["label"]), dtype=torch.long),
+        )
 
 
 class TripletMetaDataset(Dataset):
@@ -243,61 +298,12 @@ class TripletMetaDataset(Dataset):
         img_id = str(row["img_id"])
         image = load_rgb_image(self.img_dir / f"{img_id}.png")
         tensor = self.transform(image)
-        return (
-            img_id,
-            tensor,
-            torch.tensor(int(row["blood_id_label"]), dtype=torch.long),
-            torch.tensor(int(row["blood_name_label"]), dtype=torch.long),
+        return TripletSample(
+            img_id=img_id,
+            image=tensor,
+            blood_id_label=torch.tensor(int(row["blood_id_label"]), dtype=torch.long),
+            blood_name_label=torch.tensor(int(row["blood_name_label"]), dtype=torch.long),
         )
-
-
-class PKBatchSampler(Sampler[list[int]]):
-    def __init__(
-        self,
-        labels: list[int] | np.ndarray | pd.Series,
-        classes_per_batch: int = 16,
-        samples_per_class: int = 4,
-        batches_per_epoch: int | None = None,
-        seed: int = 42,
-    ) -> None:
-        self.labels = [int(label) for label in labels]
-        self.classes_per_batch = int(classes_per_batch)
-        self.samples_per_class = int(samples_per_class)
-        self.batch_size = self.classes_per_batch * self.samples_per_class
-        self.batches_per_epoch = int(batches_per_epoch or math.ceil(len(self.labels) / max(self.batch_size, 1)))
-        self.seed = int(seed)
-        self.epoch = 0
-
-        by_label: dict[int, list[int]] = defaultdict(list)
-        for index, label in enumerate(self.labels):
-            by_label[label].append(index)
-        self.by_label = dict(by_label)
-        self.unique_labels = sorted(self.by_label)
-
-    def __len__(self) -> int:
-        return self.batches_per_epoch
-
-    def set_epoch(self, epoch: int) -> None:
-        self.epoch = int(epoch)
-
-    def __iter__(self) -> Iterator[list[int]]:
-        rng = random.Random(self.seed + self.epoch)
-        for _ in range(self.batches_per_epoch):
-            if len(self.unique_labels) >= self.classes_per_batch:
-                labels = rng.sample(self.unique_labels, self.classes_per_batch)
-            else:
-                labels = [rng.choice(self.unique_labels) for _ in range(self.classes_per_batch)]
-
-            batch: list[int] = []
-            for label in labels:
-                indices = self.by_label[label]
-                replace = len(indices) < self.samples_per_class
-                if replace:
-                    batch.extend(rng.choice(indices) for _ in range(self.samples_per_class))
-                else:
-                    batch.extend(rng.sample(indices, self.samples_per_class))
-            rng.shuffle(batch)
-            yield batch
 
 
 class BloodIdPKSampler(Sampler[list[int]]):
@@ -384,4 +390,8 @@ class PairDataset(Dataset):
 
     def __getitem__(self, index: int):
         img_id_a, img_id_b, label = self.rows[index]
-        return self._load_image(img_id_a), self._load_image(img_id_b), torch.tensor(label, dtype=torch.float32)
+        return PairSample(
+            img_a=self._load_image(img_id_a),
+            img_b=self._load_image(img_id_b),
+            label=torch.tensor(label, dtype=torch.float32),
+        )

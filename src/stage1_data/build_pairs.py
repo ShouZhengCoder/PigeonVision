@@ -62,6 +62,10 @@ def main() -> int:
         print(f"pair outputs already exist: {args.train_output}, {args.val_output}")
         return 0
 
+    if not args.annotation_dir.exists():
+        raise FileNotFoundError(f"标注目录不存在: {args.annotation_dir}")
+    if not any(args.annotation_dir.glob("*.json")):
+        print(f"[warn] 标注目录中无 JSON 文件: {args.annotation_dir}", flush=True)
     valid_imgs = {p.stem for p in args.annotation_dir.glob("*.json")}
     rel = pd.read_csv(args.relations, header=None, names=["blood_id", "img_id"])
     rel["img_id"] = rel["img_id"].astype(str)

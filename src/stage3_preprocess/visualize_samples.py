@@ -118,7 +118,8 @@ def main() -> int:
         x = c * tile_w
         grid[y : y + tile_h, x : x + tile_w] = panel
 
-    cv2.imwrite(str(output), grid)
+    if not cv2.imwrite(str(output), grid):
+        print(f"[warn] 写入可视化失败: {output}", flush=True)
     print(f"wrote: {output}")
     return 0
 

@@ -21,11 +21,13 @@ from dataset import (
     BloodIdPKSampler,
     TripletMetaDataset,
     add_triplet_label_columns,
+    build_overlap_matrix,
     build_triplet_label_maps,
     default_transform,
+    load_multi_label_meta,
     load_triplet_meta,
 )
-from loss import batch_hard_triplet_loss
+from loss import batch_hard_triplet_loss, batch_hard_triplet_loss_multi
 from model import IrisEncoder
 
 
@@ -137,6 +139,7 @@ def run_epoch(
     device: torch.device,
     margin: float,
     desc: str,
+    multi_label_map: dict[str, set[int]] | None = None,
 ) -> tuple[float, float, float]:
     training = optimizer is not None
     encoder.train(training)
@@ -152,7 +155,14 @@ def run_epoch(
             if training:
                 optimizer.zero_grad(set_to_none=True)
             embeddings = encoder(images)
-            loss, d_pos, d_neg = batch_hard_triplet_loss(embeddings, blood_ids, blood_names, margin=margin)
+            if multi_label_map is not None:
+                img_id_list = [str(i) for i in _img_ids]
+                overlap = build_overlap_matrix(img_id_list, multi_label_map, device)
+                loss, d_pos, d_neg = batch_hard_triplet_loss_multi(
+                    embeddings, overlap, blood_names, margin=margin)
+            else:
+                loss, d_pos, d_neg = batch_hard_triplet_loss(
+                    embeddings, blood_ids, blood_names, margin=margin)
             if training:
                 loss.backward()
                 optimizer.step()
@@ -412,6 +422,15 @@ def main() -> int:
     train_rows = add_triplet_label_columns(train_rows, blood_id_to_label, blood_name_to_label)
     val_rows = add_triplet_label_columns(val_rows, blood_id_to_label, blood_name_to_label)
 
+    # Load multi-label blood_id info (for multi-positive triplet)
+    multi_train_meta = resolve_root_path(ROOT / "data" / "train_multi_meta.csv")
+    multi_label_map: dict[str, set[int]] = {}
+    if multi_train_meta.exists():
+        multi_label_map = load_multi_label_meta(multi_train_meta)
+        logger.info("loaded multi-label map: %s images", len(multi_label_map))
+    else:
+        logger.warning("multi_label_meta not found, falling back to single-label triplet")
+
     train_ds = TripletMetaDataset(
         train_rows,
         iris_dir,
@@ -510,8 +529,12 @@ def main() -> int:
         current_lr = get_epoch_lr(epoch, total_epochs, warmup_epochs, base_lr)
         set_optimizer_lr(optimizer, current_lr)
 
-        train_loss, train_pos, train_neg = run_epoch(encoder, train_loader, optimizer, device, margin, f"train {epoch}")
-        last_val_loss, val_pos, val_neg = run_epoch(encoder, val_loss_loader, None, device, margin, f"val {epoch}")
+        train_loss, train_pos, train_neg = run_epoch(
+            encoder, train_loader, optimizer, device, margin, f"train {epoch}",
+            multi_label_map=multi_label_map)
+        last_val_loss, val_pos, val_neg = run_epoch(
+            encoder, val_loss_loader, None, device, margin, f"val {epoch}",
+            multi_label_map=multi_label_map)
 
         val_eval_loader = make_eval_loader(val_ds, batch_size, args.num_workers, device)
         _ordered_ids, val_features, val_blood_ids, val_blood_names = extract_embeddings(encoder, val_eval_loader, device, desc=f"val features {epoch}")

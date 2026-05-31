@@ -13,6 +13,8 @@ from unet_common import (
     IMAGE_SIZE,
     NORMALIZED_SHAPE,
     EllipseSpec,
+    IrisSegmentationFailure,
+    IrisSegmentationSuccess,
     PredictionResult,
     build_unet,
     compute_mask_confidence,
@@ -118,24 +120,27 @@ class UNetPredictor:
             center_y = int(round((pupil_ellipse.cy + iris_ellipse.cy) / 2.0))
             inner_radius = int(round(pupil_ellipse.equivalent_radius()))
             outer_radius = int(round(iris_ellipse.equivalent_radius()))
-        else:
-            center_x = center_y = inner_radius = outer_radius = -1
-
-        return PredictionResult(
-            success=success,
-            status="success" if success else "failed",
+            return IrisSegmentationSuccess(
+                mask_confidence=float(mask_confidence),
+                source_width=int(source_width),
+                source_height=int(source_height),
+                input_size=int(self.input_size),
+                cx=center_x,
+                cy=center_y,
+                r_inner=inner_radius,
+                r_outer=outer_radius,
+                pupil=pupil_ellipse,
+                iris=iris_ellipse,
+                mask=pred_mask,
+            )
+        return IrisSegmentationFailure(
             reason=reason,
             mask_confidence=float(mask_confidence),
             source_width=int(source_width),
             source_height=int(source_height),
             input_size=int(self.input_size),
-            cx=center_x,
-            cy=center_y,
-            r_inner=inner_radius,
-            r_outer=outer_radius,
             pupil=pupil_ellipse,
             iris=iris_ellipse,
-            mask=pred_mask,
         )
 
 
@@ -175,13 +180,12 @@ def normalize_iris(
     iris: EllipseSpec | None = None,
     shape: tuple[int, int] = NORMALIZED_SHAPE,
 ) -> np.ndarray:
-    if isinstance(prediction_or_pupil, PredictionResult):
-        prediction = prediction_or_pupil
-        if not prediction.success or prediction.pupil is None or prediction.iris is None:
-            raise ValueError(prediction.reason)
-        pupil = prediction.pupil
-        iris = prediction.iris
-        input_size = prediction.input_size
+    if isinstance(prediction_or_pupil, IrisSegmentationSuccess):
+        pupil = prediction_or_pupil.pupil
+        iris = prediction_or_pupil.iris
+        input_size = prediction_or_pupil.input_size
+    elif isinstance(prediction_or_pupil, IrisSegmentationFailure):
+        raise ValueError(prediction_or_pupil.reason)
     else:
         pupil = prediction_or_pupil
         if iris is None:
@@ -198,13 +202,12 @@ def daugman_normalize_color(
     iris: EllipseSpec | None = None,
     shape: tuple[int, int] = NORMALIZED_SHAPE,
 ) -> np.ndarray:
-    if isinstance(prediction_or_pupil, PredictionResult):
-        prediction = prediction_or_pupil
-        if not prediction.success or prediction.pupil is None or prediction.iris is None:
-            raise ValueError(prediction.reason)
-        pupil = prediction.pupil
-        iris = prediction.iris
-        input_size = prediction.input_size
+    if isinstance(prediction_or_pupil, IrisSegmentationSuccess):
+        pupil = prediction_or_pupil.pupil
+        iris = prediction_or_pupil.iris
+        input_size = prediction_or_pupil.input_size
+    elif isinstance(prediction_or_pupil, IrisSegmentationFailure):
+        raise ValueError(prediction_or_pupil.reason)
     else:
         pupil = prediction_or_pupil
         if iris is None:
@@ -224,12 +227,12 @@ def extract_iris_region(
     prediction_or_iris: PredictionResult | EllipseSpec,
     input_size: int = IMAGE_SIZE,
 ) -> np.ndarray:
-    if isinstance(prediction_or_iris, PredictionResult):
+    if isinstance(prediction_or_iris, IrisSegmentationSuccess):
         prediction = prediction_or_iris
-        if not prediction.success or prediction.iris is None:
-            raise ValueError(prediction.reason)
         iris = prediction.iris
         input_size = prediction.input_size
+    elif isinstance(prediction_or_iris, IrisSegmentationFailure):
+        raise ValueError(prediction_or_iris.reason)
     else:
         iris = prediction_or_iris
 
@@ -255,19 +258,20 @@ def visualize_localization(
     img_bgr: np.ndarray,
     prediction: PredictionResult,
 ) -> np.ndarray:
-    image_gray = resize_gray_image(img_bgr, prediction.input_size)
-    if prediction.mask is None:
-        canvas = cv2.cvtColor(image_gray, cv2.COLOR_GRAY2BGR)
-    else:
+    if isinstance(prediction, IrisSegmentationSuccess):
+        image_gray = resize_gray_image(img_bgr, prediction.input_size)
         canvas = overlay_mask(image_gray, prediction.mask)
-
-    if prediction.pupil is not None:
         cv2.ellipse(canvas, ellipse_to_cv2(prediction.pupil), (0, 255, 0), 2)
-    if prediction.iris is not None:
         cv2.ellipse(canvas, ellipse_to_cv2(prediction.iris), (0, 0, 255), 2)
+        text = f"success conf={prediction.mask_confidence:.3f}"
+    else:
+        image_gray = resize_gray_image(img_bgr, prediction.input_size)
+        canvas = cv2.cvtColor(image_gray, cv2.COLOR_GRAY2BGR)
+        if prediction.pupil is not None:
+            cv2.ellipse(canvas, ellipse_to_cv2(prediction.pupil), (0, 255, 0), 2)
+        if prediction.iris is not None:
+            cv2.ellipse(canvas, ellipse_to_cv2(prediction.iris), (0, 0, 255), 2)
+        text = f"failed conf={prediction.mask_confidence:.3f} {prediction.reason}"
 
-    text = f"{prediction.status} conf={prediction.mask_confidence:.3f}"
-    if prediction.reason and prediction.reason != "ok":
-        text = f"{text} {prediction.reason}"
     cv2.putText(canvas, text[:80], (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (30, 30, 30), 1, cv2.LINE_AA)
     return canvas

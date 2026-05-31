@@ -48,8 +48,11 @@ def main() -> int:
     rows: list[tuple[str, str]] = []
     seen: set[str] = set()
 
-    for idx in tqdm(range(1, 13), desc="scan dirs"):
-        subdir = args.data_root / str(idx)
+    subdirs = sorted(
+        [d for d in args.data_root.iterdir() if d.is_dir() and d.name != "datasetXGN"],
+        key=lambda d: d.name,
+    )
+    for subdir in tqdm(subdirs, desc="scan dirs"):
         if not subdir.exists():
             print(f"[warn] missing directory: {subdir}")
             continue

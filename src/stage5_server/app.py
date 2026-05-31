@@ -18,7 +18,8 @@ pipeline = IrisPipeline()
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stage 5 Flask service for iris compare and search.")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="Server host (use 0.0.0.0 to expose on all interfaces)")
     parser.add_argument("--port", type=int, default=5000)
     return parser.parse_args()
 

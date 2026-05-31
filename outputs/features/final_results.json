@@ -1,0 +1,23 @@
+{
+  "search_ml": {
+    "recall_at_1": 0.23657433578292822,
+    "recall_at_5": 0.41294516676088183,
+    "recall_at_10": 0.47682306387789714,
+    "mAP": 0.11609331568421699
+  },
+  "compare_ml": {
+    "accuracy": 0.64673,
+    "balanced_accuracy": 0.64673,
+    "auc": 0.70175887265,
+    "eer": 0.36104,
+    "threshold": 1.348268430373248
+  },
+  "search_sl": {
+    "recall_at_1": 0.0,
+    "recall_at_5": 0.0,
+    "recall_at_10": 0.0,
+    "mAP": 0.0
+  },
+  "gallery_size": 22043,
+  "query_size": 3647
+}

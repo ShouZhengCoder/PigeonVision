@@ -56,3 +56,56 @@ def batch_hard_triplet_loss(
     valid_neg = neg_dist[valid_anchor]
     loss = torch.clamp(valid_pos - valid_neg + float(margin), min=0.0).mean()
     return loss, valid_pos.detach().mean(), valid_neg.detach().mean()
+
+
+def batch_hard_triplet_loss_multi(
+    embeddings: torch.Tensor,
+    blood_id_overlap: torch.Tensor,  # (B, B) bool: True if images share any blood_id
+    blood_names: torch.Tensor,       # (B,) int: blood_name labels for negative mining
+    margin: float = 0.3,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Multi-positive batch-hard triplet loss.
+
+    Positive samples = any image sharing >=1 blood_id with anchor.
+    Negative samples = images with different blood_name AND no shared blood_id.
+    "Hard" = take the farthest positive and closest negative per anchor.
+
+    Reference: MADML (Saeki et al., ICICT 2024)
+    """
+    if embeddings.ndim != 2:
+        raise ValueError(f"embeddings must be 2D, got shape={tuple(embeddings.shape)}")
+
+    blood_names = blood_names.to(device=embeddings.device).view(-1)
+    blood_id_overlap = blood_id_overlap.to(device=embeddings.device)
+    if embeddings.size(0) != blood_names.numel():
+        raise ValueError("embeddings and blood_names must have the same batch size")
+
+    embeddings = F.normalize(embeddings, p=2, dim=1)
+    distances = torch.cdist(embeddings, embeddings, p=2)
+    batch_size = embeddings.size(0)
+    eye = torch.eye(batch_size, dtype=torch.bool, device=embeddings.device)
+
+    # Positive: shared blood_id (multi-label) but exclude self
+    positive_mask = blood_id_overlap & ~eye
+
+    # Negative: different blood_name AND no shared blood_id
+    neg_name_mask = blood_names[:, None] != blood_names[None, :]
+    negative_mask = neg_name_mask & ~blood_id_overlap
+    # Same blood_name with no shared blood_id (edge case) -> still not negative
+    # (these are the "ignore" cases, neither positive nor negative)
+
+    valid_anchor = positive_mask.any(dim=1) & negative_mask.any(dim=1)
+
+    if not torch.any(valid_anchor):
+        zero = embeddings.sum() * 0.0
+        return zero, zero.detach(), zero.detach()
+
+    # Hardest positive (farthest among positives)
+    pos_dist = distances.masked_fill(~positive_mask, -1.0).max(dim=1).values
+    # Hardest negative (closest among negatives)
+    neg_dist = distances.masked_fill(~negative_mask, float("inf")).min(dim=1).values
+
+    valid_pos = pos_dist[valid_anchor]
+    valid_neg = neg_dist[valid_anchor]
+    loss = torch.clamp(valid_pos - valid_neg + float(margin), min=0.0).mean()
+    return loss, valid_pos.detach().mean(), valid_neg.detach().mean()

@@ -24,7 +24,7 @@ for import_dir in (STAGE4_DIR, STAGE3_DIR):
 
 from iris_localize import UNetPredictor, daugman_normalize_color  # noqa: E402
 from model import IrisEncoder  # noqa: E402
-from unet_common import DEFAULT_MASK_CONFIDENCE, NORMALIZED_SHAPE  # noqa: E402
+from unet_common import DEFAULT_MASK_CONFIDENCE, NORMALIZED_SHAPE, IrisSegmentationSuccess  # noqa: E402
 
 
 class IrisPipeline:
@@ -106,7 +106,7 @@ class IrisPipeline:
             eye_bgr,
             mask_confidence_threshold=float(DEFAULT_MASK_CONFIDENCE),
         )
-        if not prediction.success:
+        if not isinstance(prediction, IrisSegmentationSuccess):
             raise ValueError(
                 f"虹膜分割失败：{prediction.reason}。请上传清晰的眼部特写，"
                 "或直接上传 64×512 的归一化虹膜图。"
@@ -130,10 +130,10 @@ class IrisPipeline:
             device=self._ultralytics_device(),
         )
         if not results:
-            return image_bgr
+            raise ValueError("眼部检测失败：YOLO模型无输出，请确认检测模型已正确加载")
         boxes = results[0].boxes
         if boxes is None or len(boxes) == 0:
-            return image_bgr
+            raise ValueError("眼部检测失败：未能检测到鸽眼，请上传包含清晰眼部特写的图片")
 
         best_index = -1
         best_conf = -1.0
@@ -143,7 +143,10 @@ class IrisPipeline:
                 best_conf = conf
                 best_index = idx
         if best_index < 0:
-            return image_bgr
+            raise ValueError(
+                f"眼部检测失败：置信度最高的检测框 ({best_conf:.2f}) 低于阈值 "
+                f"{self.detection_confidence}，请上传更清晰的眼部特写图片"
+            )
 
         x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[best_index].tolist()]
         image_height, image_width = image_bgr.shape[:2]

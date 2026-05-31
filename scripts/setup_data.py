@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import tarfile
 from pathlib import Path
 
@@ -51,7 +52,10 @@ def main() -> int:
         file_size_gb = archive_path.stat().st_size / (1024 ** 3)
         print(f"[{desc}] 解压 {archive_name} ({file_size_gb:.1f} GB)...")
         with tarfile.open(archive_path) as tar:
-            tar.extractall(path=ROOT, filter="data")
+            kw: dict[str, object] = {}
+            if sys.version_info >= (3, 12):
+                kw["filter"] = "data"
+            tar.extractall(path=ROOT, **kw)  # type: ignore[arg-type]
         print(f"  完成")
 
     print("\n数据已就绪。验证:")

@@ -62,7 +62,8 @@ def main() -> int:
 
     try:
         existing_files = set(api.list_repo_files(args.repo, repo_type=REPO_TYPE))
-    except Exception:
+    except Exception as exc:
+        print(f"[error] 获取远程文件列表失败 (--resume 降级为全量上传): {exc}", flush=True)
         existing_files = set()
 
     total_files = 0
@@ -99,14 +100,8 @@ def main() -> int:
         print("[DRY RUN] 使用 --execute 参数执行实际上传。")
         return 0
 
-    ensure_repo_exists = True
+    create_repo(args.repo, repo_type=REPO_TYPE, exist_ok=True)
     for file_path, hf_path in tqdm(to_upload, desc="uploading"):
-        if ensure_repo_exists:
-            try:
-                create_repo(args.repo, repo_type=REPO_TYPE, exist_ok=True)
-            except Exception:
-                pass
-            ensure_repo_exists = False
         upload_file(
             path_or_fileobj=str(file_path),
             path_in_repo=hf_path,

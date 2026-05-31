@@ -391,3 +391,222 @@ def compute_probe_recall_by_related_breeds(
         nearest = gallery_indices[int(np.argmin(distances))]
         hits += int(names[nearest] in related_sets[query])
     return hits / max(valid, 1)
+
+
+# ---------------------------------------------------------------------------
+# Blood-ID level multi-label evaluation
+# Each image may have multiple blood_ids. Two images are "related" if they
+# share at least one blood_id.
+# ---------------------------------------------------------------------------
+
+def load_blood_id_sets(relations_path: str | Path) -> dict[str, frozenset[str]]:
+    rel = pd.read_csv(
+        relations_path,
+        header=None,
+        names=["blood_id", "img_id"],
+        dtype={"blood_id": str, "img_id": str},
+    )
+    rel = rel.dropna(subset=["blood_id", "img_id"])
+    rel["blood_id"] = rel["blood_id"].astype(str).str.strip()
+    rel["img_id"] = rel["img_id"].astype(str).str.strip()
+    rel = rel[(rel["blood_id"] != "") & (rel["img_id"] != "")]
+    rel = rel.drop_duplicates(subset=["blood_id", "img_id"])
+
+    img_to_bloods: dict[str, set[str]] = defaultdict(set)
+    for row in rel.itertuples(index=False):
+        img_to_bloods[str(row.img_id)].add(str(row.blood_id))
+    return {img_id: frozenset(bloods) for img_id, bloods in img_to_bloods.items()}
+
+
+def _ordered_blood_id_sets(
+    img_ids: list[str] | np.ndarray,
+    blood_id_sets: dict[str, frozenset[str]],
+) -> list[frozenset[str]]:
+    return [blood_id_sets.get(str(img_id), frozenset()) for img_id in img_ids]
+
+
+def _blood_id_relevant_mask(
+    query_blood_ids: frozenset[str],
+    gallery_blood_id_sets: list[frozenset[str]],
+    exclude_index: int | None = None,
+) -> np.ndarray:
+    relevant = np.asarray([bool(query_blood_ids & g_set) for g_set in gallery_blood_id_sets], dtype=bool)
+    if exclude_index is not None and 0 <= exclude_index < len(relevant):
+        relevant[exclude_index] = False
+    return relevant
+
+
+def compute_search_metrics_by_blood_ids(
+    features: np.ndarray,
+    img_ids: list[str] | np.ndarray,
+    blood_id_sets: dict[str, frozenset[str]],
+) -> dict[str, float]:
+    n = len(img_ids)
+    if n < 2:
+        return dict(EMPTY_SEARCH_METRICS)
+
+    ordered_sets = _ordered_blood_id_sets(img_ids, blood_id_sets)
+    norms = np.sum(features * features, axis=1, keepdims=True)
+    dist2 = norms + norms.T - 2.0 * (features @ features.T)
+    np.fill_diagonal(dist2, np.inf)
+    order = np.argsort(dist2, axis=1)
+
+    recall_hits = {1: 0, 5: 0, 10: 0}
+    aps: list[float] = []
+    valid = 0
+    for i in range(n):
+        query_set = ordered_sets[i]
+        if not query_set:
+            continue
+        relevant = _blood_id_relevant_mask(query_set, ordered_sets, exclude_index=i)
+        relevant_total = int(np.sum(relevant))
+        if relevant_total == 0:
+            continue
+        valid += 1
+        ranked_relevant = relevant[order[i]]
+        for k in (1, 5, 10):
+            recall_hits[k] += int(np.any(ranked_relevant[: min(k, len(ranked_relevant))]))
+        hits = 0
+        precision_sum = 0.0
+        for rank, is_relevant in enumerate(ranked_relevant, start=1):
+            if is_relevant:
+                hits += 1
+                precision_sum += hits / rank
+        aps.append(precision_sum / relevant_total)
+
+    return {
+        "recall_at_1": recall_hits[1] / max(valid, 1),
+        "recall_at_5": recall_hits[5] / max(valid, 1),
+        "recall_at_10": recall_hits[10] / max(valid, 1),
+        "mAP": float(np.mean(aps)) if aps else 0.0,
+    }
+
+
+def compute_cross_search_metrics_by_blood_ids(
+    query_features: np.ndarray,
+    query_img_ids: list[str] | np.ndarray,
+    gallery_features: np.ndarray,
+    gallery_img_ids: list[str] | np.ndarray,
+    blood_id_sets: dict[str, frozenset[str]],
+    chunk_size: int = 256,
+    exclude_self: bool = False,
+) -> dict[str, float]:
+    if len(query_img_ids) == 0 or len(gallery_img_ids) == 0:
+        return dict(EMPTY_SEARCH_METRICS)
+
+    query_sets = _ordered_blood_id_sets(query_img_ids, blood_id_sets)
+    gallery_sets = _ordered_blood_id_sets(gallery_img_ids, blood_id_sets)
+    gallery_norms = np.sum(gallery_features * gallery_features, axis=1)
+    recall_hits = {1: 0, 5: 0, 10: 0}
+    aps: list[float] = []
+    valid = 0
+
+    # Pre-compute self-exclusion mapping when query == gallery
+    self_exclude: dict[int, int] = {}
+    if exclude_self and query_img_ids is gallery_img_ids:
+        q_ids = [str(x) for x in query_img_ids]
+        g_ids = [str(x) for x in gallery_img_ids]
+        id_to_gidx = {id_: i for i, id_ in enumerate(g_ids)}
+        for qi, qid in enumerate(q_ids):
+            if qid in id_to_gidx:
+                self_exclude[qi] = id_to_gidx[qid]
+
+    for start in range(0, len(query_features), int(chunk_size)):
+        end = min(start + int(chunk_size), len(query_features))
+        query_chunk = query_features[start:end]
+        query_norms = np.sum(query_chunk * query_chunk, axis=1, keepdims=True)
+        dist2 = query_norms + gallery_norms[None, :] - 2.0 * (query_chunk @ gallery_features.T)
+        # Exclude self-matches
+        if exclude_self:
+            for qi in range(start, end):
+                if qi in self_exclude:
+                    dist2[qi - start, self_exclude[qi]] = np.inf
+        order = np.argsort(dist2, axis=1)
+        for local_i, ranked_idx in enumerate(order):
+            query_set = query_sets[start + local_i]
+            if not query_set:
+                continue
+            relevant = _blood_id_relevant_mask(query_set, gallery_sets)
+            relevant_total = int(np.sum(relevant))
+            if relevant_total == 0:
+                continue
+            valid += 1
+            ranked_relevant = relevant[ranked_idx]
+            for k in (1, 5, 10):
+                recall_hits[k] += int(np.any(ranked_relevant[: min(k, len(ranked_relevant))]))
+            hits = 0
+            precision_sum = 0.0
+            for rank, is_relevant in enumerate(ranked_relevant, start=1):
+                if is_relevant:
+                    hits += 1
+                    precision_sum += hits / rank
+            aps.append(precision_sum / relevant_total)
+
+    return {
+        "recall_at_1": recall_hits[1] / max(valid, 1),
+        "recall_at_5": recall_hits[5] / max(valid, 1),
+        "recall_at_10": recall_hits[10] / max(valid, 1),
+        "mAP": float(np.mean(aps)) if aps else 0.0,
+    }
+
+
+def compute_cross_compare_metrics_by_blood_ids(
+    query_features: np.ndarray,
+    query_img_ids: list[str] | np.ndarray,
+    gallery_features: np.ndarray,
+    gallery_img_ids: list[str] | np.ndarray,
+    blood_id_sets: dict[str, frozenset[str]],
+    max_pairs: int = 200000,
+    seed: int = 42,
+) -> dict[str, float]:
+    rng = np.random.default_rng(seed)
+    query_sets = _ordered_blood_id_sets(query_img_ids, blood_id_sets)
+    gallery_sets = _ordered_blood_id_sets(gallery_img_ids, blood_id_sets)
+
+    valid_queries = [idx for idx, s in enumerate(query_sets) if s]
+    valid_gallery = [idx for idx, s in enumerate(gallery_sets) if s]
+    if not valid_queries or not valid_gallery:
+        return dict(EMPTY_METRICS)
+
+    target_pos = int(max_pairs) // 2
+    positive_pairs: list[tuple[int, int]] = []
+    query_order = np.asarray(valid_queries, dtype=np.int64)
+    rng.shuffle(query_order)
+    for qi in query_order:
+        for gi in valid_gallery:
+            if query_sets[int(qi)] & gallery_sets[int(gi)]:
+                positive_pairs.append((int(qi), gi))
+                if len(positive_pairs) >= target_pos:
+                    break
+        if len(positive_pairs) >= target_pos:
+            break
+
+    if not positive_pairs:
+        return dict(EMPTY_METRICS)
+
+    target_neg = min(len(positive_pairs), target_pos)
+    negative_pairs_set: set[tuple[int, int]] = set()
+    attempts = 0
+    max_attempts = max(target_neg * 50, 1000)
+    while len(negative_pairs_set) < target_neg and attempts < max_attempts:
+        attempts += 1
+        qi = int(rng.choice(valid_queries))
+        gi = int(rng.choice(valid_gallery))
+        pair = (qi, gi)
+        if pair in negative_pairs_set:
+            continue
+        if not (query_sets[qi] & gallery_sets[gi]):
+            negative_pairs_set.add(pair)
+
+    negative_pairs = sorted(negative_pairs_set)
+    pair_n = min(len(positive_pairs), len(negative_pairs))
+    if pair_n == 0:
+        return dict(EMPTY_METRICS)
+
+    pairs = positive_pairs[:pair_n] + negative_pairs[:pair_n]
+    y_true = np.asarray([1] * pair_n + [0] * pair_n, dtype=np.int32)
+    dists = np.asarray(
+        [float(np.linalg.norm(query_features[q] - gallery_features[g])) for q, g in pairs],
+        dtype=np.float32,
+    )
+    return _finalize_compare_metrics(dists, y_true)

@@ -53,6 +53,7 @@ def parse_args() -> argparse.Namespace:
 
 def load_config(path: Path) -> dict[str, object]:
     if not path.exists():
+        print(f"[warn] 配置文件不存在: {path}，将使用所有默认值", flush=True)
         return {}
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}

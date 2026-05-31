@@ -16,8 +16,11 @@ from _common import ROOT, ensure_dir, resolve_root_path
 from dataset import default_transform, load_rgb_image, load_triplet_meta
 from model import IrisEncoder
 from relation_metrics import (
+    compute_cross_compare_metrics_by_blood_ids,
     compute_cross_compare_metrics_by_related_breeds,
+    compute_cross_search_metrics_by_blood_ids,
     compute_cross_search_metrics_by_related_breeds,
+    load_blood_id_sets,
     load_related_blood_names,
 )
 
@@ -135,6 +138,7 @@ def main() -> int:
         config.get("relations", ROOT / "data" / "extracted" / "datasetXGN" / "relations.csv")
     )
     related_blood_names = load_related_blood_names(relations_path, pigeon_csv)
+    blood_id_sets = load_blood_id_sets(relations_path)
 
     train_rows = load_triplet_meta(train_meta)
     val_rows = load_triplet_meta(val_meta)
@@ -181,14 +185,15 @@ def main() -> int:
     index.add(gallery_features.astype("float32"))
     faiss.write_index(index, str(index_path))
 
-    search_metrics = compute_cross_search_metrics_by_related_breeds(
+    # --- 单标签评估 (blood_name, 旧标准) ---
+    search_metrics_old = compute_cross_search_metrics_by_related_breeds(
         query_features,
         query_img_ids,
         gallery_features,
         gallery_blood_names,
         related_blood_names,
     )
-    compare_metrics = compute_cross_compare_metrics_by_related_breeds(
+    compare_metrics_old = compute_cross_compare_metrics_by_related_breeds(
         query_features,
         query_img_ids,
         query_blood_names,
@@ -199,23 +204,66 @@ def main() -> int:
         max_pairs=int(config.get("compare_eval_pairs", 200000)),
         seed=int(config.get("seed", 42)),
     )
-    save_eval_metrics(output_dir, checkpoint_epoch, compare_metrics, search_metrics)
+
+    # --- 多标签评估 (blood_id 重合, 新标准) ---
+    search_metrics_new = compute_cross_search_metrics_by_blood_ids(
+        query_features,
+        query_img_ids,
+        gallery_features,
+        gallery_img_ids,
+        blood_id_sets,
+    )
+    compare_metrics_new = compute_cross_compare_metrics_by_blood_ids(
+        query_features,
+        query_img_ids,
+        gallery_features,
+        gallery_img_ids,
+        blood_id_sets,
+        max_pairs=int(config.get("compare_eval_pairs", 200000)),
+        seed=int(config.get("seed", 42)),
+    )
+
+    # 保存新标准的评估结果（用于后续对比）
+    save_eval_metrics(output_dir, checkpoint_epoch, compare_metrics_new, search_metrics_new)
+
+    # 同时保存旧标准和新标准的对比
+    with (output_dir / "eval_comparison.json").open("w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "epoch": int(checkpoint_epoch),
+                "single_label (blood_name match)": {
+                    "search": {k: round(float(v), 6) for k, v in search_metrics_old.items()},
+                    "compare": {k: round(float(v), 6) for k, v in compare_metrics_old.items()},
+                },
+                "multi_label (blood_id overlap)": {
+                    "search": {k: round(float(v), 6) for k, v in search_metrics_new.items()},
+                    "compare": {k: round(float(v), 6) for k, v in compare_metrics_new.items()},
+                },
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    # 统计多标签重合信息
+    query_bid_counts = [len(blood_id_sets.get(str(i), frozenset())) for i in query_img_ids]
+    gallery_bid_counts = [len(blood_id_sets.get(str(i), frozenset())) for i in gallery_img_ids]
 
     print(f"入库图片数: {len(gallery_rows)}")
     print(f"覆盖品系数: {gallery_rows['blood_name'].nunique()}")
     print(f"query图片数: {len(query_rows)}")
     print(f"query品系数: {query_rows['blood_name'].nunique()}")
     print(f"feature shape: {gallery_features.shape}")
-    print(
-        "metrics: "
-        f"recall@1={search_metrics['recall_at_1']:.6f} "
-        f"recall@5={search_metrics['recall_at_5']:.6f} "
-        f"recall@10={search_metrics['recall_at_10']:.6f} "
-        f"mAP={search_metrics['mAP']:.6f} "
-        f"compare_bal_acc={compare_metrics['balanced_accuracy']:.6f} "
-        f"auc={compare_metrics['auc']:.6f} "
-        f"threshold={compare_metrics['threshold']:.6f}"
-    )
+    print(f"query 平均 blood_id 数: {np.mean(query_bid_counts):.1f}")
+    print(f"gallery 平均 blood_id 数: {np.mean(gallery_bid_counts):.1f}")
+    print()
+    print(f"{'指标':<20} {'单标签(旧)':<15} {'多标签(新)':<15}")
+    print("-" * 50)
+    for k in ("recall_at_1", "recall_at_5", "recall_at_10", "mAP"):
+        print(f"{'search_'+k:<20} {search_metrics_old[k]:<15.6f} {search_metrics_new[k]:<15.6f}")
+    for k in ("accuracy", "balanced_accuracy", "auc"):
+        print(f"{'compare_'+k:<20} {compare_metrics_old[k]:<15.6f} {compare_metrics_new[k]:<15.6f}")
+    print(f"{'compare_threshold':<20} {compare_metrics_old['threshold']:<15.6f} {compare_metrics_new['threshold']:<15.6f}")
     print(f"wrote: {feature_path}, {meta_path}, {index_path}")
     return 0
 
