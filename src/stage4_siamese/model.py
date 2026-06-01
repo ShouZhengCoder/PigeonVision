@@ -3,10 +3,10 @@ from __future__ import annotations
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torchvision.models import ResNet18_Weights, ResNet34_Weights, resnet18, resnet34
+from torchvision.models import ResNet18_Weights, ResNet34_Weights, ResNet50_Weights, resnet18, resnet34, resnet50
 
 
-BACKBONES = {"resnet18", "resnet34"}
+BACKBONES = {"resnet18", "resnet34", "resnet50"}
 
 
 def _build_resnet(backbone: str, pretrained: bool, in_channels: int) -> tuple[nn.Module, int]:
@@ -16,6 +16,9 @@ def _build_resnet(backbone: str, pretrained: bool, in_channels: int) -> tuple[nn
     elif backbone == "resnet34":
         weights = ResNet34_Weights.DEFAULT if pretrained else None
         model = resnet34(weights=weights)
+    elif backbone == "resnet50":
+        weights = ResNet50_Weights.DEFAULT if pretrained else None
+        model = resnet50(weights=weights)
     else:
         raise ValueError(f"Unsupported backbone: {backbone}. Expected one of {sorted(BACKBONES)}")
 
