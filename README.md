@@ -43,6 +43,18 @@ python src/stage5_server/app.py
 
 访问 http://localhost:5000 使用 Web 界面。
 
+## 效果
+
+| 任务 | 指标 | 值 |
+|------|------|:--:|
+| Search | R@1 | **35.5%** |
+| | R@10 | **59.1%** |
+| | mAP | 16.2% |
+| Compare | AUC | **73.1%** |
+| | BalAcc | 66.9% |
+
+> 图库 22K 张，多标签 blood_id 重合评估。详细实验记录见 [docs/experiments.md](docs/experiments.md)。
+
 ## 项目结构
 
 ```
@@ -91,7 +103,7 @@ curl -X POST http://localhost:5000/compare \
   -F "image_b=@iris2.png"
 ```
 
-返回: `{"distance": 0.83, "same_family": false, "threshold": 1.0}`
+返回: `{"distance": 0.83, "same_family": false, "threshold": 1.3}`
 
 ### POST /search
 
@@ -100,6 +112,8 @@ curl -X POST http://localhost:5000/search \
   -F "image=@iris.png" \
   -F "top_k=10"
 ```
+
+返回: `{"results": [{"rank": 1, "img_id": "571835", "pg_id": "2016-26-0571835", "blood_name": "桑杰士", "distance": 0.21}, ...]}`
 
 ## 技术栈
 
