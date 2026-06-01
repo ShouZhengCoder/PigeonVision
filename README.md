@@ -48,24 +48,25 @@ python src/stage5_server/app.py
 ```
 PigeonVision/
 ├── src/
-│   ├── stage1_data/         # 数据整理：图片索引、YOLO标注、样本对
+│   ├── stage1_data/         # 数据整理：图片索引、YOLO标注、样本对、多标签meta
 │   ├── stage2_detection/    # YOLOv5 眼部检测训练与推理
-│   ├── stage3_preprocess/   # U-Net 虹膜分割 + 椭圆展开归一化
-│   ├── stage4_siamese/      # Triplet 孪生网络训练 + FAISS 特征库
-│   └── stage5_server/       # Flask 后端服务
+│   ├── stage3_preprocess/   # U-Net 虹膜分割 + 椭圆Daugman归一化
+│   ├── stage4_siamese/      # IrisEncoder 训练 + FAISS 特征库 + 多模型融合
+│   └── stage5_server/       # Flask 后端服务 (默认 Concat 1024d 融合模型)
 ├── configs/                 # 训练配置文件
 ├── scripts/                 # 工具脚本
-│   ├── setup_data.py        # 从 HF 仓库解压 tar 数据包
-│   └── sync_hf.py           # 将本地数据同步到 HF 仓库
+│   ├── setup_data.py        # 从 HF 仓库解压数据 + 合并新文件
+│   └── sync_hf.py           # 上传本地数据到 HF 仓库
 ├── data/                    # 元数据 CSV（大文件在 HF）
-│   ├── pairs_train.csv
-│   ├── pairs_val.csv
-│   ├── train_meta.csv
-│   └── val_meta.csv
-├── outputs/                 # 中间产物 CSV（图片在 HF）
-│   ├── eye_crops/           # crop_meta.csv
-│   ├── iris_normalized/     # normalize_meta.csv
-│   └── features/            # eval_metrics.json, threshold.json
+│   ├── train_meta.csv / val_meta.csv               # 单标签元数据
+│   ├── train_multi_meta.csv / val_multi_meta.csv   # 多标签元数据
+│   └── pairs_train.csv / pairs_val.csv             # 样本对
+├── outputs/                 # 中间产物（图片/特征在 HF）
+│   ├── eye_crops/           # YOLO眼部裁剪 + crop_meta.csv
+│   ├── iris_normalized/     # 64×512 虹膜归一化图 + normalize_meta.csv
+│   └── features/
+│       ├── fusion_1024d_full/  # 默认：Concat 1024d 特征库 + FAISS索引
+│       └── *.json              # 评估指标
 └── ROADMAP.md               # 技术路线总文档
 ```
 
@@ -105,9 +106,10 @@ curl -X POST http://localhost:5000/search \
 - **目标检测**: YOLOv5s (ultralytics)
 - **虹膜分割**: U-Net (PyTorch, GroupNorm)
 - **椭圆展开**: Daugman 极坐标重映射
-- **特征编码**: ResNet34 + Triplet Loss
+- **特征编码**: ResNet34/50 + Triplet/SupCon/ArcFace → Concat 1024d 融合
 - **向量检索**: FAISS IndexFlatL2
 - **后端服务**: Flask
+- **检索效果**: R@1 35.5%, R@10 59.1%, Compare AUC 73.1%
 
 ## 许可证
 
