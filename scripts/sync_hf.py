@@ -21,9 +21,9 @@ REPO_ID = "jshouEX/pigeon-breed-image-dataset"
 REPO_TYPE = "dataset"
 
 # Local path -> HF path mapping
-# Each entry: (local_dir, hf_target_dir, glob_pattern, description)
+# Only sync new/changed files; bulk images already on HF from prior uploads.
 SYNC_PLAN = [
-    # --- data/ (metadata CSVs) ---
+    # --- Metadata CSVs (small, frequently updated) ---
     ("data", "data", "train_meta.csv", "训练元数据"),
     ("data", "data", "val_meta.csv", "验证元数据"),
     ("data", "data", "train_multi_meta.csv", "多标签训练元数据"),
@@ -31,33 +31,29 @@ SYNC_PLAN = [
     ("data", "data", "blood_id_map.json", "血脉ID映射"),
     ("data", "data", "pairs_train.csv", "训练样本对"),
     ("data", "data", "pairs_val.csv", "验证样本对"),
-    # --- data/ (large files) ---
-    ("data/extracted", "data/extracted", "*/*.jpg", "原始鸽眼图"),
-    ("data/unet_labelme_80", "data/unet_labelme_80", "**/*", "U-Net 标注样本"),
     ("data/yolo_dataset", "data/yolo_dataset", "data.yaml", "YOLO 数据集配置"),
-    # --- outputs/ (images) ---
+    # --- Output metadata ---
     ("outputs/eye_crops", "outputs/eye_crops", "crop_meta.csv", "眼部裁剪元数据"),
-    ("outputs/eye_crops", "outputs/eye_crops", "*.jpg", "YOLO 眼部裁剪"),
     ("outputs/iris_normalized", "outputs/iris_normalized", "normalize_meta.csv", "归一化元数据"),
-    ("outputs/iris_normalized", "outputs/iris_normalized", "*.png", "归一化虹膜图"),
     ("outputs", "outputs", "img_index.csv", "图片索引"),
-    # --- outputs/features/ (feature DBs) ---
-    ("outputs/features", "outputs/features", "*.json", "评估指标"),
+    # --- Feature databases ---
+    ("outputs/features", "outputs/features", "*.json", "评估指标 JSON"),
     ("outputs/features", "outputs/features", "feature_db.npy", "特征向量 (单模型)"),
-    ("outputs/features", "outputs/features", "feature_db_meta.csv", "特征库元数据 (单模型)"),
-    ("outputs/features", "outputs/features", "faiss_index.bin", "FAISS 索引 (单模型)"),
-    # --- outputs/features/fusion_1024d_full/ (默认融合模型) ---
+    ("outputs/features", "outputs/features", "feature_db_meta.csv", "特征库元数据"),
+    ("outputs/features", "outputs/features", "faiss_index.bin", "FAISS 索引"),
+    # --- Fusion 1024d (new) ---
     ("outputs/features/fusion_1024d_full", "outputs/features/fusion_1024d_full", "faiss_index.bin", "FAISS 索引 (1024d)"),
     ("outputs/features/fusion_1024d_full", "outputs/features/fusion_1024d_full", "feature_db.npy", "特征向量 (1024d)"),
     ("outputs/features/fusion_1024d_full", "outputs/features/fusion_1024d_full", "feature_db_meta.csv", "特征库元数据 (1024d)"),
     ("outputs/features/fusion_1024d_full", "outputs/features/fusion_1024d_full", "*.json", "评估指标 (1024d)"),
-    # --- checkpoints/ ---
+    # --- Checkpoints ---
     ("checkpoints/detection", "checkpoints/detection", "**/best.pt", "YOLO 检测权重"),
     ("checkpoints/segmentation", "checkpoints/segmentation", "best.pt", "U-Net 分割权重"),
     ("checkpoints/siamese", "checkpoints/siamese", "best.pt", "Triplet 编码器"),
     ("checkpoints/siamese", "checkpoints/siamese", "last.pt", "Triplet 编码器 (last)"),
-    # --- checkpoints/siamese/*/ (experiment subdirs) ---
+    # --- New experiment checkpoints ---
     ("checkpoints/siamese", "checkpoints/siamese", "supcon/best.pt", "SupCon 编码器"),
+    ("checkpoints/siamese", "checkpoints/siamese", "supcon/last.pt", "SupCon 编码器 (last)"),
     ("checkpoints/siamese", "checkpoints/siamese", "arcface_v2/best.pt", "ArcFace v2 编码器"),
     ("checkpoints/siamese", "checkpoints/siamese", "arcface/best.pt", "ArcFace v1 编码器"),
     ("checkpoints/siamese", "checkpoints/siamese", "pk_supcon/best.pt", "PK-SupCon 编码器"),
