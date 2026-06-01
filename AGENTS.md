@@ -31,7 +31,7 @@ Full spec: read `ROADMAP.md` before writing any code.
 | `outputs/features/` | Feature vectors + FAISS index |
 | `checkpoints/detection/` | YOLOv5 weights |
 | `checkpoints/segmentation/` | U-Net weights |
-| `checkpoints/siamese/` | Siamese encoder weights |
+| `checkpoints/siamese/` | Siamese encoder weights (包含 subdirs: arcface/, supcon/, pk_supcon/, proxy_anchor/) |
 | `configs/unet.yaml` | U-Net training config |
 | `configs/` | Training configs (YAML) |
 | `src/stage{1..6}_*/` | Source code per stage |
@@ -55,13 +55,15 @@ def load_img_index():
 - Annotation JSONs contain labels `"eye"`, `"mouse"`, `"900"` → **keep only `"eye"`**
 - `pigeon.csv` has 11 columns: `ID, PID, CID, SID, NAME, COLOR, EYE, PG_ID, SEX, BLOOD, IMG`; field `weidth` in annotation JSONs is a typo for `width` — use as-is
 - MobileNetV2 expects 3-channel RGB input; grayscale iris images need `.convert("RGB")` before resize
+- Multi-label bloodlines: each image averages 6.4 blood_ids; evaluation must use blood_id overlap (not blood_name match) for accuracy
+- Best model: Concat 512d fusion (Triplet 256-dim + SupCon 256-dim concatenated)
 
 ## Stage Status
 
 Update this section as stages complete:
 
-- [ ] Stage 1 — Data prep (`outputs/img_index.csv`, `data/yolo_dataset/`, `data/pairs_*.csv`)
-- [ ] Stage 2 — Eye detection (`checkpoints/detection/best.pt`, `outputs/eye_crops/`)
+- [x] Stage 1 — Data prep (`outputs/img_index.csv`, `data/yolo_dataset/`, `data/pairs_*.csv`, `data/*_multi_meta.csv`)
+- [x] Stage 2 — Eye detection (`checkpoints/detection/best.pt`, `outputs/eye_crops/`)
 - [x] Stage 3 — Iris segmentation + normalization (`outputs/iris_normalized/`)
 - [x] Stage 3.5 — Rebuild pairs (`data/pairs_train.csv` rebuilt from full iris_normalized set)
 - [x] Stage 4 — Siamese training (`checkpoints/siamese/best.pt`, `outputs/features/`)

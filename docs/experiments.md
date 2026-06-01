@@ -7,7 +7,17 @@
 - **Compare**：两张虹膜图 → 判断是否同血脉
 - **Search**：一张虹膜图 → 在 22K 数据库中检索 Top-K 血脉相关鸽子
 
-**完整推理管线**：YOLOv5 眼部检测 → U-Net 虹膜分割 → Daugman 归一化 → IrisEncoder 特征提取 → FAISS 检索 → Flask API
+**完整推理管线**：
+
+```
+原始鸽眼图 (31,896 张)
+  → [Stage 2] YOLOv5 眼部检测 → 眼部裁剪 (25,766 张)
+    → [Stage 3] U-Net 虹膜分割 → Daugman 归一化 → 64×512 虹膜图 (25,690 张)
+      → [Stage 4] IrisEncoder 特征提取 → L2 归一化向量 (256/512-dim)
+        → [Stage 5] FAISS 检索 / 距离比对 → Flask API
+
+最佳模型：Concat 512d (Triplet 256d + SupCon 256d 拼接)
+```
 
 ---
 
@@ -157,6 +167,33 @@
 
 **结论**：Concat 512d 在所有指标上全面最优，是最佳模型。
 
+### 实验 9：ArcFace 单标签 + Concat 1024d 融合
+
+**方法**：
+- 9a（ArcFace 单标签训练）：标准 ArcFace + CrossEntropy，ResNet50，512-dim，486 个 blood_name 类别。s=30，m=0.5，60 epochs。
+- 9b（Concat 1024d）：拼接 Triplet（256-dim）+ SupCon（256-dim）+ ArcFace（512-dim）→ 1024-dim 嵌入
+
+**ArcFace 训练结果**（epoch 32 最优，47 epoch 早停）：
+
+| 指标 | 值 |
+|------|:------:|
+| Train loss | 29.0 → 0.37（稳定收敛） |
+| Cross-eval R@1 | 27.7% |
+| Cross-eval mAP | 20.9% |
+
+**Concat 1024d 完整评估**（22K 图库）：
+
+| 指标 | Concat 512d (前最佳) | **Concat 1024d** | 变化 |
+|------|:------:|:------:|:------:|
+| Search R@1 | 25.9% | **35.5%** | **↑ 9.6pp** |
+| Search R@5 | 43.6% | **52.0%** | ↑ 8.4pp |
+| Search R@10 | 51.8% | **59.1%** | ↑ 7.3pp |
+| Search mAP | 12.4% | **16.2%** | ↑ 31% |
+| Compare AUC | 71.0% | **73.1%** | ↑ 2.1pp |
+| Compare BalAcc | 65.0% | **66.9%** | ↑ 1.9pp |
+
+**结论**：ArcFace 的 proxy-based 全局分类特征与 Triplet/SupCon 的 pair-based 局部对比特征高度互补。Concat 1024d 在所有指标上取得大幅领先，首次实现 R@1 突破 35%、R@10 接近 60%。
+
 ---
 
 ## 六、最终模型效果
@@ -165,30 +202,32 @@
 
 | 任务 | 指标 | 值 |
 |------|------|:------:|
-| **Search** | R@1 | **25.9%** |
-| | R@5 | **43.6%** |
-| | R@10 | **51.8%** |
-| | P@5 | 18.3% |
-| | P@10 | 15.5% |
-| | mAP | 12.4% |
-| **Compare** | AUC | **71.0%** |
-| | BalAcc | **65.0%** |
+| **Search** | R@1 | **35.5%** |
+| | R@5 | **52.0%** |
+| | R@10 | **59.1%** |
+| | P@5 | 23.2% |
+| | P@10 | 18.7% |
+| | mAP | 16.2% |
+| **Compare** | AUC | **73.1%** |
+| | BalAcc | **66.9%** |
 
 ### 6.2 用户视角解读
 
-- **检索**：上传一张鸽眼图，返回 10 个结果，**52% 的概率至少有一张血脉相关**；返回 10 张图，**其中约 1-2 张血脉相关**
-- **比对**：两张鸽眼图 → 判断是否同血脉，**正确率 65%（随机 50%）**，**AUC 71.0%**
+- **检索**：上传一张鸽眼图，返回 10 个结果，**59% 的概率至少有一张血脉相关**；返回 10 张图，**其中约 2-3 张血脉相关**
+- **比对**：两张鸽眼图 → 判断是否同血脉，**正确率 67%（随机 50%）**，**AUC 73.1%**
 
 ### 6.3 模型配置
 
 ```
-Concat 512d 融合模型:
+Concat 1024d 融合模型 (最佳):
   ├── Triplet Encoder: ResNet34, 256-dim
   │   (训练: 7K张, 486品种, PK sampler, batch_hard_triplet_loss)
-  └── SupCon Encoder: ResNet34, 256-dim
-      (训练: 22K张, 6626品种, SupCon Loss, τ=0.07)
+  ├── SupCon Encoder: ResNet34, 256-dim
+  │   (训练: 22K张, 6626品种, SupCon Loss, τ=0.07)
+  └── ArcFace Encoder: ResNet50, 512-dim
+      (训练: 7K张, 486品种, ArcFace + CrossEntropy, s=30, m=0.5)
 
-FAISS: IndexFlatL2, 512-dim, 22K vectors
+FAISS: IndexFlatL2, 1024-dim, 22K vectors
 API: Flask, /search + /compare endpoints
 ```
 
@@ -235,4 +274,4 @@ API: Flask, /search + /compare endpoints
 ## 十、文档版本
 
 - 更新日期：2026-06-01
-- 对应 Git commit：`4d98e03 feat: 多标签血脉评估 + MoE融合 + 代码健壮性优化`
+- 对应 Git commit：Concat 1024d 融合模型 (Triplet+SupCon+ArcFace)，R@1 35.5%

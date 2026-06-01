@@ -24,12 +24,21 @@
 整体 Pipeline：
 
 ```
-原始鸽眼图
-  └─[Stage 2: YOLOv5]─→ 眼部 bbox 裁剪
-       └─[Stage 3: U-Net分割 + 椭圆展开]─→ 64×512 虹膜纹理图
-            └─[Stage 4: 孪生网络]─→ 128-dim L2归一化特征向量
-                 ├─[Stage 5: 比对接口]─→ 欧氏距离 + 阈值判断
-                 └─[Stage 5: 检索接口]─→ FAISS Top-K + PG_ID/BLOOD
+原始鸽眼图 (31,896 张)
+  └─[Stage 2: YOLOv5]─→ 眼部 bbox 裁剪 (25,766 张)
+       └─[Stage 3: U-Net分割 + 椭圆Daugman展开]─→ 64×512 虹膜纹理图 (25,690 张)
+            └─[Stage 4: IrisEncoder]─→ 256/512-dim L2归一化特征向量
+                 ├─[Stage 5: /compare]─→ 欧氏距离 + 阈值判断 (AUC 73.1%)
+                 └─[Stage 5: /search]─→ FAISS IndexFlatL2 Top-K (R@1 35.5%, R@10 59.1%)
+
+模型配置：
+  Concat 1024d 融合模型 (最佳):
+    ├── Triplet Encoder: ResNet34, 256-dim (PK sampler, batch_hard_triplet_loss)
+    ├── SupCon Encoder: ResNet34, 256-dim (SupCon Loss, τ=0.07)
+    └── ArcFace Encoder: ResNet50, 512-dim (ArcFace + CrossEntropy, s=30, m=0.5)
+  
+  FAISS: IndexFlatL2, 1024-dim, 22K vectors
+  API: Flask, /search + /compare + /health endpoints
 ```
 
 ---
@@ -56,12 +65,12 @@ PigeonVision/
 │       └── img_list.txt              ← 31,900 行图片 ID
 │
 ├── src/
-│   ├── stage1_data/                  ← 数据整理脚本
-│   ├── stage2_detection/             ← YOLOv5 目标检测
-│   ├── stage3_preprocess/            ← 虹膜分割与归一化
-│   ├── stage4_siamese/               ← 孪生网络训练
+│   ├── stage1_data/                  ← 数据整理脚本 (含多标签 meta 构建、rebuild_pairs)
+│   ├── stage2_detection/             ← YOLOv5 眼部检测
+│   ├── stage3_preprocess/            ← U-Net 虹膜分割与椭圆Daugman归一化
+│   ├── stage4_siamese/               ← IrisEncoder 训练 (Triplet/SupCon/ArcFace/Proxy-Anchor)
 │   ├── stage5_server/                ← Flask 后端服务
-│   └── stage6_android/               ← Android 部署
+│   └── stage6_android/               ← Android 部署 (规划中)
 │
 ├── configs/
 │   ├── yolov5.yaml                   ← YOLOv5 训练配置
@@ -78,9 +87,11 @@ PigeonVision/
 │   ├── eye_crops/                    ← YOLO 裁剪的眼部图像
 │   ├── iris_normalized/              ← U-Net + 椭圆展开后的虹膜图像（64×512）
 │   └── features/
-│       ├── feature_db.npy            ← 特征向量矩阵（N×128）
-│       ├── feature_db_meta.csv       ← img_id, pg_id, blood
-│       └── faiss_index.bin           ← FAISS 索引
+│       ├── feature_db.npy            ← 特征向量矩阵 (22043×256 或 22043×512)
+│       ├── feature_db_meta.csv       ← img_id, pg_id, blood, blood_name
+│       ├── faiss_index.bin           ← FAISS IndexFlatL2
+│       ├── eval_metrics.json         ← 评估指标 (search + compare)
+│       └── threshold.json            ← 最佳阈值
 │
 └── logs/                             ← 训练日志
 ```
@@ -353,105 +364,145 @@ r(θ) = ab / sqrt((b·cosθ)^2 + (a·sinθ)^2)
 
 ---
 
-## 阶段四：孪生网络训练
+## 阶段四：IrisEncoder 训练（度量学习）
 
-**目标**：训练 IrisEncoder，将虹膜图映射为 128-dim L2 归一化特征向量。
+**目标**：训练 IrisEncoder，将 64×512 虹膜图映射为 256-dim L2 归一化特征向量。
 
 ### 网络结构
 
 ```python
 class IrisEncoder(nn.Module):
-    # MobileNetV2 backbone（pretrained，去分类头）
-    # AdaptiveAvgPool2d(1) → flatten → FC(1280, 128) → L2 normalize
-    # 输入：128×128 RGB（3通道，由 64×512 灰度图复制通道后 resize）
-    # 输出：128-dim 单位向量
+    # ResNet34/50 backbone（pretrained ImageNet，去分类头）
+    # AdaptiveAvgPool2d(1) → flatten → Linear(in_features, feat_dim) → BatchNorm1d → L2 normalize
+    # 输入：64×512 RGB（3通道，灰度图复制通道）
+    # 输出：256-dim 单位向量（默认）/ 512-dim
 ```
+
+支持的 backbone：`resnet18`、`resnet34`、`resnet50`，默认 `resnet34`。
 
 ### 损失函数
 
-Contrastive Loss：
+**主方案：Batch Hard Triplet Loss + PK Sampler**
+
 ```python
-d = ||f_a - f_b||_2
-L = y * d^2 + (1-y) * max(margin - d, 0)^2
-# y=1: 同血统（正对）；y=0: 不同血统（负对）；margin=1.0
+# PK 采样：每 batch 选 P=16 个 blood_name，每个 blood_name 取 K=4 张图 → batch=64
+# 对每个 anchor，选 hardest positive + hardest negative（基于 blood_id 重合）
+L = max(d(anchor, hardest_positive) - d(anchor, hardest_negative) + margin, 0)
+# margin = 0.3
 ```
+
+**多正样本变体**：若 blood_id 重合则将对应样本视为正样本（支持多标签）。
 
 ### 训练配置（configs/siamese.yaml）
 
 ```yaml
-feat_dim: 128
-margin: 1.0
+feat_dim: 256
+backbone: resnet34
+in_channels: 3
+triplet_margin: 0.3
+warmup_epochs: 3
 batch_size: 64
-lr: 0.001
-epochs: 100
-optimizer: adam
+lr: 0.0003
+epochs: 80
 scheduler: cosine
-input_size: 128
-normalize_mean: [0.5, 0.5, 0.5]
-normalize_std: [0.5, 0.5, 0.5]
-checkpoint_dir: checkpoints/siamese/
-iris_dir: outputs/iris_normalized/
-pairs_train: data/pairs_train.csv
-pairs_val: data/pairs_val.csv
+input_shape: [64, 512]
+classes_per_batch: 16      # P
+samples_per_class: 4       # K
+min_images_per_blood: 5
+min_images_per_blood_id: 2
+min_db_images_per_blood: 20
 ```
+
+### 实验方案（已完成的 8 个实验）
+
+| 实验 | 方法 | 效果 | 状态 |
+|------|------|------|:--:|
+| 1 | 评估修正 (blood_id 多标签) | 旧评估 R@1 42%→实际 17.5%，Compare AUC 62%→65% | ✅ |
+| 2 | 代码健壮性优化 | Python 3.9、cv2 检查、类型安全 | ✅ |
+| 3 | SupCon 多标签训练 | Compare AUC +7.5%，但检索略降 | ✅ |
+| 4 | PK-SupCon + Warm-Start | 模型退化 | ❌ |
+| 5 | Multi-Positive Triplet | 嵌入弥散，不如原始 | ❌ |
+| 6 | Proxy-Anchor Loss | 未收敛 | ❌ |
+| 7 | ArcFace Loss | 7a (BCE) 不收敛，7b (单标签) 未运行 | ⚠️ |
+| **8** | **MoE Concat 512d** | **全面最优**：R@1 25.9%, R@10 51.8%, AUC 71.0% | ✅ |
+
+**最佳模型**：Concat 512d（Triplet 256d + SupCon 256d 拼接），无需重训，直接拼接两个互补模型。
+
+详细实验记录见 `docs/experiments.md`。
 
 ### 输出文件
 
 | 文件 | 内容 |
 |------|------|
-| `src/stage4_siamese/model.py` | IrisEncoder 定义 |
-| `src/stage4_siamese/dataset.py` | PairDataset |
-| `src/stage4_siamese/loss.py` | contrastive_loss |
-| `src/stage4_siamese/train.py` | 训练主脚本 |
-| `src/stage4_siamese/build_db.py` | 构建 FAISS 特征数据库 |
-| `checkpoints/siamese/best.pt` | 最优编码器权重 |
-| `outputs/features/feature_db.npy` | N×128 特征矩阵 |
-| `outputs/features/feature_db_meta.csv` | img_id, pg_id, blood |
+| `src/stage4_siamese/model.py` | IrisEncoder 定义 (ResNet34/50) |
+| `src/stage4_siamese/dataset.py` | TripletMetaDataset + PK sampler |
+| `src/stage4_siamese/loss.py` | batch_hard_triplet_loss / batch_hard_triplet_loss_multi |
+| `src/stage4_siamese/loss_supcon.py` | SupCon Loss |
+| `src/stage4_siamese/loss_proxy_anchor.py` | Proxy-Anchor Loss |
+| `src/stage4_siamese/train.py` | 训练主脚本 (Triplet) |
+| `src/stage4_siamese/train_multilabel.py` | SupCon 训练脚本 |
+| `src/stage4_siamese/train_arcface.py` | ArcFace 训练脚本 |
+| `src/stage4_siamese/train_proxy_anchor.py` | Proxy-Anchor 训练脚本 |
+| `src/stage4_siamese/build_db.py` | 构建 FAISS 特征数据库 + 双标准评估 |
+| `src/stage4_siamese/relation_metrics.py` | 多标签 blood_id 评估指标 |
+| `checkpoints/siamese/best.pt` | 最优 Triplet 编码器权重 |
+| `checkpoints/siamese/supcon/best.pt` | 最优 SupCon 编码器权重 |
+| `outputs/features/feature_db.npy` | N×256 或 N×512 特征矩阵 |
+| `outputs/features/feature_db_meta.csv` | img_id, pg_id, blood, blood_name |
 | `outputs/features/faiss_index.bin` | FAISS IndexFlatL2 |
+| `outputs/features/eval_metrics.json` | 评估指标 JSON |
+| `outputs/features/threshold.json` | 最佳阈值 |
 
 ### build_db.py 逻辑
 
-- 读取 `outputs/iris_normalized/normalize_meta.csv`，得到 status=success 的全部 img_id 集合（成功集，str 类型）
-- 读取 `pigeon.csv`，将 `ID` 列转为 str，筛选 BLOOD 字段样本数 ≥ 50 的品系
-- **取两者交集**（即：该图片既有成功的归一化结果，又有 BLOOD 标签）
+- 读取 `outputs/iris_normalized/normalize_meta.csv`，得到 status=success 的全部 img_id 集合
+- 读取 `pigeon.csv`，筛选 BLOOD 字段样本数 ≥ 20 的品系
+- **取两者交集**
 - 对交集图片提取特征，保存 feature_db.npy、feature_db_meta.csv
-- 构建 FAISS IndexFlatL2(128)，序列化保存
+- 构建 FAISS IndexFlatL2，序列化保存
+- **同时运行双标准评估**：单标签 (blood_name 匹配) + 多标签 (blood_id 重合)
+
+### 评估标准
+
+**多标签 blood_id 评估（新标准，更准确）**：
+- 两张图共享任意 blood_id → 血脉相关
+- 反映真实血脉关系（每图平均 6.4 个 blood_id，91.8% 图像有多重血脉）
+
+**Search 指标**：
+- **R@K (Recall@K)**：返回 K 张图中至少有一张血脉相关 → 此查询成功；成功查询占比
+- **P@K (Precision@K)**：返回 K 张图中血脉相关的比例
+- **mAP**：平均精度均值
+
+**Compare 指标**：AUC、Balanced Accuracy、EER
 
 ### 验收标准
-- 验证集 Recall@1 ≥ 0.5
-- `outputs/features/faiss_index.bin` 存在，feature_db_meta.csv 行数 ≥ 15,000
+- Search R@1 ≥ 20%（基于多标签 blood_id 评估）
+- Compare AUC ≥ 65%
+- `outputs/features/faiss_index.bin` 存在，feature_db_meta.csv 行数 ≥ 20,000
 
 ---
 
 ## 阶段五：后端服务
 
-**目标**：Flask 服务，暴露两个 HTTP 接口。
+**目标**：Flask 服务，暴露 HTTP 接口。
 
 ### 接口定义
 
 **POST /compare**（multipart: image_a, image_b）
 ```json
-{"distance": 0.83, "result": "可能是同一家族", "threshold": 1.0}
+{"distance": 0.83, "same_family": true, "threshold": 0.72}
 ```
 
-**POST /search**（multipart: image, top_k=4）
+**POST /search**（multipart: image, top_k=10）
 ```json
 {"results": [{"rank":1, "img_id":"571835", "pg_id":"2016-26-0571835", "blood":"桑杰士", "distance":0.21}]}
 ```
 
-### 输出文件
+**GET /health** → `{"status": "ok", "models_loaded": true}`
 
-| 文件 | 内容 |
-|------|------|
-| `src/stage5_server/app.py` | Flask 主应用 |
-| `src/stage5_server/pipeline.py` | 推理 Pipeline |
-| `src/stage5_server/threshold.py` | 阈值标定（ROC 曲线） |
-| `src/stage5_server/templates/index.html` | Web 演示页面 |
-| `src/stage5_server/requirements.txt` | 依赖列表 |
+**GET /** → Web 演示页面
 
 ### Pipeline 逻辑
-
-用户上传的图片分两种情况，pipeline 需要分别处理：
 
 ```python
 def process_image(img_bytes):
@@ -460,35 +511,40 @@ def process_image(img_bytes):
 
     # 情况一：已是归一化虹膜图（宽高比约 8:1，如 512×64）
     if w / h > 4:
-        iris_img = img.convert("RGB").resize((128, 128))
+        iris_img = img.resize((512, 64))
 
-    # 情况二：眼部特写（接近方形或圆形，如截图里那种虹膜特写）
-    # 直接走 U-Net 分割 + 椭圆拟合 + 归一化
+    # 情况二：眼部特写（接近方形）
+    # 直接走 U-Net 分割 + 椭圆 Daugman 归一化
     elif 0.5 < w / h < 2.0:
-        iris_arr, meta = iris_segment_and_normalize(np.array(img.convert("L")))
-        if iris_arr is None or meta["status"] != "success":
-            raise ValueError("虹膜分割失败，请上传清晰的眼部图像")
-        iris_img = Image.fromarray(iris_arr).convert("RGB").resize((128, 128))
+        iris_arr = iris_segment_and_normalize(np.array(img))
+        if iris_arr is None:
+            raise ValueError("虹膜分割失败")
 
-    # 情况三：原始全图（含鸽身背景），先走 YOLO 检测裁剪眼部，再走情况二
+    # 情况三：原始全图（含鸽身背景）
+    # 先走 YOLO 检测裁剪眼部，再走情况二
     else:
         bbox = yolo_detect_eye(img)
         if bbox is None:
-            raise ValueError("未检测到眼部区域，请上传包含眼睛的鸽子图像")
+            raise ValueError("未检测到眼部区域")
         eye_crop = img.crop(bbox)
-        iris_arr, meta = iris_segment_and_normalize(np.array(eye_crop.convert("L")))
-        if iris_arr is None or meta["status"] != "success":
-            raise ValueError("虹膜分割失败")
-        iris_img = Image.fromarray(iris_arr).convert("RGB").resize((128, 128))
+        iris_arr = iris_segment_and_normalize(np.array(eye_crop))
 
-    return encoder(ToTensor(Normalize(iris_img)))
+    # IrisEncoder → FAISS search / distance compare
+    return encoder(transform(iris_img))
 ```
 
-Demo 演示时用情况二（眼部特写）即可，与截图效果一致。
+### 模型加载
+
+启动时加载三个模型：
+- YOLOv5（眼部检测，`checkpoints/detection/exp/weights/best.pt`）
+- U-Net（虹膜分割，`checkpoints/segmentation/best.pt`）
+- IrisEncoder（特征提取，`checkpoints/siamese/best.pt` 或 Concat 512d）
+- FAISS Index（检索，`outputs/features/faiss_index.bin`）
 
 ### 验收标准
 - 两个接口均能返回正确 JSON
 - Web 页面能上传图片并展示结果
+- 服务绑定 127.0.0.1:5000
 
 ---
 
@@ -561,7 +617,7 @@ gunicorn
 2. **blood.csv 已弃用**：不要在新脚本中引用 blood.csv，其数据已全部包含在 relations.csv 中。
 3. **标注噪声**：只保留 `label == "eye"`，过滤 "mouse" 和 "900"。
 4. **图片查找**：所有脚本通过 `outputs/img_index.csv` 查找图片路径，禁止硬编码子目录。
-5. **UNet 输入**：Stage 3 的训练和推理必须统一为 `256×256`、1 通道灰度、`GroupNorm(num_groups=8)`。
-6. **MobileNetV2 输入**：预训练模型需要 3 通道 RGB，归一化后的灰度虹膜图需 `img.convert('RGB')` 再 resize 到 128×128。
-7. **FAISS 向量**：存入前确保已 L2 归一化（此时 L2 距离 ≡ 余弦距离）。
+5. **IrisEncoder 输入**：Stage 4 输入为 64×512 RGB（3通道），灰度图需复制通道；不同 backbone 的输入尺寸需一致。
+6. **FAISS 向量**：存入前确保已 L2 归一化（此时 L2 距离 ≡ 余弦距离）。
+7. **多标签评估**：使用 blood_id 重合评估（非 blood_name 匹配），每张图平均 6.4 个 blood_id。
 8. **阶段依赖**：Stage 3 依赖 Stage 2 输出和 `data/unet_labelme_80/` 标注集；Stage 3.5 依赖 Stage 3 输出；Stage 4 依赖 Stage 3.5 输出。Stage 1 最优先执行。

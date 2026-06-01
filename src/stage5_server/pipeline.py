@@ -27,6 +27,15 @@ from model import IrisEncoder  # noqa: E402
 from unet_common import DEFAULT_MASK_CONFIDENCE, NORMALIZED_SHAPE, IrisSegmentationSuccess  # noqa: E402
 
 
+# Default fusion config: (checkpoint, feat_dim, backbone)
+FUSION_ENCODERS = [
+    (ROOT / "checkpoints" / "siamese" / "best.pt", 256, "resnet34"),
+    (ROOT / "checkpoints" / "siamese" / "supcon" / "best.pt", 256, "resnet34"),
+    (ROOT / "checkpoints" / "siamese" / "arcface_v2" / "best.pt", 512, "resnet50"),
+]
+FUSION_DEFAULT_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full"
+
+
 class IrisPipeline:
     def __init__(
         self,
@@ -41,14 +50,13 @@ class IrisPipeline:
         detection_confidence: float = 0.7,
         detection_expand_ratio: float = 0.1,
         device: str | torch.device | None = None,
+        fusion: bool = True,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.fusion = bool(fusion)
         self.siamese_checkpoint = self._resolve(siamese_checkpoint)
         self.detection_checkpoint = self._resolve(detection_checkpoint)
         self.segmentation_checkpoint = self._resolve(segmentation_checkpoint)
-        self.faiss_index_path = self._resolve(faiss_index_path)
-        self.feature_meta_path = self._resolve(feature_meta_path)
-        self.threshold_path = self._resolve(threshold_path)
         self.siamese_config_path = self._resolve(siamese_config_path)
         self.unet_config_path = self._resolve(unet_config_path)
 
@@ -56,9 +64,23 @@ class IrisPipeline:
         self.unet_config = self._load_yaml(self.unet_config_path)
         self.detection_confidence = float(detection_confidence)
         self.detection_expand_ratio = float(detection_expand_ratio)
+
+        # In fusion mode, use the 1024d feature DB by default
+        if self.fusion:
+            faiss_index_path = self._resolve(faiss_index_path)
+            feature_meta_path = self._resolve(feature_meta_path)
+            threshold_path = self._resolve(threshold_path)
+            if not Path(faiss_index_path).exists() and FUSION_DEFAULT_DIR.exists():
+                faiss_index_path = FUSION_DEFAULT_DIR / "faiss_index.bin"
+                feature_meta_path = FUSION_DEFAULT_DIR / "feature_db_meta.csv"
+                threshold_path = ROOT / "outputs" / "features" / "threshold.json"
+
+        self.faiss_index_path = self._resolve(faiss_index_path)
+        self.feature_meta_path = self._resolve(feature_meta_path)
+        self.threshold_path = self._resolve(threshold_path)
         self.threshold = self._load_threshold(self.threshold_path)
         self.detector = self._load_detector()
-        self.encoder = self._load_encoder()
+        self.encoders = self._load_encoders()
         self.segmenter = self._load_segmenter()
         self.index = self._load_faiss_index()
         self.meta = self._load_feature_meta()
@@ -87,7 +109,15 @@ class IrisPipeline:
         normalized_bgr = self._prepare_normalized_iris(image_bgr)
         tensor = self._normalized_bgr_to_tensor(normalized_bgr).to(self.device)
         with torch.no_grad():
-            embedding = self.encoder(tensor).detach().cpu().numpy()[0].astype(np.float32)
+            if len(self.encoders) == 1:
+                embedding = self.encoders[0](tensor).detach().cpu().numpy()[0].astype(np.float32)
+            else:
+                parts = []
+                for enc in self.encoders:
+                    f = enc(tensor).detach().cpu().numpy()[0].astype(np.float32)
+                    f = f / (np.linalg.norm(f) + 1e-12)
+                    parts.append(f)
+                embedding = np.concatenate(parts).astype(np.float32)
         norm = float(np.linalg.norm(embedding))
         if norm <= 1e-12:
             raise ValueError("编码失败：embedding 范数为 0")
@@ -196,15 +226,23 @@ class IrisPipeline:
             results.append(item)
         return results
 
-    def _load_encoder(self) -> IrisEncoder:
-        if not self.siamese_checkpoint.exists():
-            raise FileNotFoundError(f"缺少孪生网络权重：{self.siamese_checkpoint}")
-        state = torch.load(self.siamese_checkpoint, map_location=self.device)
+    def _load_encoders(self) -> list[IrisEncoder]:
+        if not self.fusion:
+            return [self._load_single_encoder(self.siamese_checkpoint)]
+        encoders = []
+        for ckpt_path, feat_dim, backbone in FUSION_ENCODERS:
+            resolved = self._resolve(ckpt_path)
+            if not resolved.exists():
+                raise FileNotFoundError(f"缺少编码器权重：{resolved}")
+            encoders.append(self._load_single_encoder(resolved, feat_dim, backbone))
+        return encoders
+
+    def _load_single_encoder(self, checkpoint_path: Path, feat_dim: int = 256, backbone: str = "resnet34") -> IrisEncoder:
+        state = torch.load(checkpoint_path, map_location=self.device)
         checkpoint_config = state.get("config", {}) if isinstance(state, dict) else {}
-        feat_dim = int(checkpoint_config.get("feat_dim", self.siamese_config.get("feat_dim", 256)))
-        backbone = str(checkpoint_config.get("backbone", self.siamese_config.get("backbone", "resnet34")))
-        in_channels = int(checkpoint_config.get("in_channels", self.siamese_config.get("in_channels", 3)))
-        encoder = IrisEncoder(feat_dim=feat_dim, backbone=backbone, pretrained=False, in_channels=in_channels).to(self.device)
+        dim = int(checkpoint_config.get("feat_dim", feat_dim))
+        arch = str(checkpoint_config.get("backbone", backbone))
+        encoder = IrisEncoder(feat_dim=dim, backbone=arch, pretrained=False, in_channels=3).to(self.device)
         model_state = state["model_state"] if isinstance(state, dict) and "model_state" in state else state
         encoder.load_state_dict(model_state)
         encoder.eval()
@@ -257,9 +295,9 @@ class IrisPipeline:
             raise ValueError(
                 f"FAISS 索引数量与元数据行数不一致：index={self.index.ntotal}, meta={len(self.meta)}"
             )
-        feat_dim = int(self.siamese_config.get("feat_dim", 256))
-        if int(self.index.d) != feat_dim:
-            raise ValueError(f"FAISS 维度与配置不一致：index.d={self.index.d}, feat_dim={feat_dim}")
+        expected_dim = 1024 if self.fusion else int(self.siamese_config.get("feat_dim", 256))
+        if int(self.index.d) != expected_dim:
+            raise ValueError(f"FAISS 维度与配置不一致：index.d={self.index.d}, expected={expected_dim}")
 
     def _normalized_bgr_to_tensor(self, normalized_bgr: np.ndarray) -> torch.Tensor:
         height, width = self.input_shape

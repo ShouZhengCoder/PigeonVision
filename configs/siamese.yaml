@@ -1,4 +1,4 @@
-feat_dim: 256
+feat_dim: 1024  # Concat 1024d fusion (256+256+512)
 backbone: resnet34
 in_channels: 3
 triplet_margin: 0.3
@@ -16,8 +16,8 @@ checkpoint_dir: checkpoints/siamese/
 iris_dir: outputs/iris_normalized/
 normalize_meta: outputs/iris_normalized/normalize_meta.csv
 pigeon_csv: data/extracted/datasetXGN/pigeon.csv
-train_meta: data/train_meta.csv
-val_meta: data/val_meta.csv
+train_meta: data/train_multi_meta.csv
+val_meta: data/val_multi_meta.csv
 min_images_per_blood: 5
 min_images_per_blood_id: 2
 min_db_images_per_blood: 20
@@ -29,3 +29,20 @@ batches_per_epoch: 0
 compare_eval_pairs: 200000
 pairs_train: data/pairs_train.csv
 pairs_val: data/pairs_val.csv
+
+# Fusion mode (Concat 1024d)
+fusion:
+  enabled: true
+  total_dim: 1024
+  encoders:
+    - checkpoint: checkpoints/siamese/best.pt
+      feat_dim: 256
+      backbone: resnet34
+    - checkpoint: checkpoints/siamese/supcon/best.pt
+      feat_dim: 256
+      backbone: resnet34
+    - checkpoint: checkpoints/siamese/arcface_v2/best.pt
+      feat_dim: 512
+      backbone: resnet50
+  faiss_index: outputs/features/fusion_1024d_full/faiss_index.bin
+  feature_meta: outputs/features/fusion_1024d_full/feature_db_meta.csv
