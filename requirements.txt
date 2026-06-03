@@ -1,0 +1,16 @@
+# Core inference (server)
+torch>=1.12.0
+torchvision>=0.13.0
+flask>=2.0
+opencv-python>=4.5.0
+numpy>=1.21.0
+pandas>=1.3.0
+faiss-cpu>=1.7.0
+Pillow>=8.0.0
+PyYAML>=5.4.0
+scikit-learn>=0.24.0
+ultralytics>=8.0.0
+tqdm>=4.60.0
+
+# Training only
+tensorboard>=2.8.0

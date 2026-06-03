@@ -58,7 +58,7 @@ def main() -> int:
             tar.extractall(path=ROOT, **kw)  # type: ignore[arg-type]
 
     # 2. Merge individual files from HF clone (new checkpoints, fusion features, CSVs)
-    # These were uploaded separately and aren't in the old tar archives
+    # Overwrites tar contents when newer individual files exist (HF is authoritative)
     copied = 0
     for item in hf_dir.iterdir():
         if item.name.endswith(".tar") or item.name.startswith("."):
@@ -70,16 +70,15 @@ def main() -> int:
                     continue
                 rel = src_file.relative_to(hf_dir)
                 dst_file = ROOT / rel
-                if not dst_file.exists():
-                    dst_file.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src_file, dst_file)
-                    copied += 1
-        elif item.is_file() and not dest.exists():
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+                copied += 1
+        elif item.is_file():
             shutil.copy2(item, dest)
             copied += 1
 
     if copied:
-        print(f"[merge] 从 HF 合并了 {copied} 个新文件")
+        print(f"[merge] 从 HF 合并了 {copied} 个文件（覆盖 tar 旧版本）")
 
     print("\n数据已就绪。验证:")
     print(f"  ls {ROOT / 'data' / 'extracted' / '1'}")
