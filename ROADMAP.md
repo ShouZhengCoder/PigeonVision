@@ -70,7 +70,7 @@ PigeonVision/
 │   ├── stage3_preprocess/            ← U-Net 虹膜分割与椭圆Daugman归一化
 │   ├── stage4_siamese/               ← IrisEncoder 训练 (Triplet/SupCon/ArcFace/Proxy-Anchor)
 │   ├── stage5_server/                ← Flask 后端服务
-│   └── stage6_android/               ← Android 部署 (规划中)
+│   └── stage6_android/               ← Android 客户端：NCNN YOLO 裁眼 + Flask HTTP 调用
 │
 ├── configs/
 │   ├── yolov5.yaml                   ← YOLOv5 训练配置
@@ -488,17 +488,19 @@ min_db_images_per_blood: 20
 
 ### 接口定义
 
-**POST /compare**（multipart: image_a, image_b）
+**POST /compare**（multipart: image_a, image_b, eye_crop=0/1）
 ```json
 {"distance": 0.83, "same_family": true, "threshold": 0.72}
 ```
 
-**POST /search**（multipart: image, top_k=10）
+**POST /search**（multipart: image, top_k=20, eye_crop=0/1）
 ```json
-{"results": [{"rank":1, "img_id":"571835", "pg_id":"2016-26-0571835", "blood":"桑杰士", "distance":0.21}]}
+{"results": [{"rank":1, "img_id":"571835", "pg_id":"2016-26-0571835", "blood_name":"桑杰士", "distance":0.21, "image_url":"/image/571835"}]}
 ```
 
-**GET /health** → `{"status": "ok", "models_loaded": true}`
+**GET /image/<img_id>** → 返回 `outputs/img_index.csv` 中的原始鸽眼图，用于客户端展示检索缩略图
+
+**GET /health** → `{"status": "ok", "gallery_size": 22043, "breed_count": 1234}`
 
 **GET /** → Web 演示页面
 
@@ -550,39 +552,47 @@ def process_image(img_bytes):
 
 ## 阶段六：Android 部署
 
-**目标**：将 IrisEncoder 部署到 Android，实现离线推理。
+**目标**：实现 Android 客户端，负责拍照/选图、NCNN YOLOv5s 眼部检测裁剪，并调用 Stage 5 Flask 服务完成品种比对和检索。
 
-### 模型转换流程
+### 架构
 
-```bash
-# 1. PyTorch → ONNX
-python src/stage6_android/export_onnx.py
-# 输出: checkpoints/siamese/encoder.onnx，输入(1,3,128,128)，输出(1,128)
+```text
+Android:
+  原始图片 -> NCNN YOLOv5s 检测眼部 -> JPEG 眼部裁剪图
 
-# 2. ONNX → NCNN
-onnx2ncnn encoder.onnx encoder.param encoder.bin
-
-# 3. 量化 float16
-ncnnoptimize encoder.param encoder.bin encoder_fp16.param encoder_fp16.bin 1
+Flask:
+  eye_crop=1 -> U-Net 虹膜分割 -> 椭圆 Daugman 展开 -> IrisEncoder -> FAISS / distance
 ```
 
-### JNI 接口
+Android 端不做 U-Net 分割、IrisEncoder 特征提取或 FAISS 检索。
 
-```java
-public class IrisEncoder {
-    public native boolean init(String paramPath, String binPath);
-    public native float[] encode(Bitmap bitmap);  // 返回 128-dim float[]
-}
-```
+### 客户端功能
+
+- 服务端地址输入、持久化和 `/health` 连接测试
+- 品种比对：两张图分别裁眼，POST `/compare`，附带 `eye_crop=1`
+- 品种检索：一张图裁眼，POST `/search`，附带 `eye_crop=1` 和自定义 `top_k`
+- 检索 Top-K 范围 `1-100`，默认 `20`
+- 检索结果每页 10 条分页，展示排名、品系名、PG_ID、blood_id、img_id、距离和原始鸽眼缩略图
 
 ### 输出文件
 
 | 文件 | 内容 |
 |------|------|
-| `src/stage6_android/export_onnx.py` | ONNX 导出脚本 |
-| `src/stage6_android/jni/iris_encoder.cpp` | NCNN JNI C++ |
-| `src/stage6_android/android_app/` | Android Studio 工程 |
-| `src/stage6_android/DEPLOY.md` | 部署步骤说明 |
+| `src/stage6_android/app/src/main/assets/yolo/model.ncnn.param` | NCNN YOLOv5s 参数 |
+| `src/stage6_android/app/src/main/assets/yolo/model.ncnn.bin` | NCNN YOLOv5s 权重 |
+| `src/stage6_android/app/src/main/cpp/yolo_jni.cpp` | NCNN JNI 推理与 bbox 解析 |
+| `src/stage6_android/app/src/main/java/com/pigeonvision/app/YoloDetector.kt` | Kotlin 检测封装 |
+| `src/stage6_android/app/src/main/java/com/pigeonvision/app/ApiClient.kt` | OkHttp API 客户端 |
+| `src/stage6_android/app/src/main/java/com/pigeonvision/app/ui/` | Jetpack Compose UI |
+| `src/stage6_android/README.md` | Android 使用说明 |
+
+### 验收标准
+
+- `./gradlew :app:assembleDebug` 成功生成 debug APK
+- `./gradlew testDebugUnitTest` 通过
+- 真机可选择/拍摄图片，未检测到眼部时提示用户靠近拍摄
+- `/compare` 返回距离和 same_family
+- `/search` 按自定义 Top-K 返回结果，分页展示缩略图
 
 ---
 

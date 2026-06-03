@@ -22,9 +22,12 @@ data class SearchResponse(val results: List<SearchResult>)
 
 data class SearchResult(
   val rank: Int,
+  val imgId: String,
+  val bloodId: String,
   val bloodName: String,
   val distance: Double,
   val pgId: String,
+  val imageUrl: String,
 )
 
 class ApiClient(
@@ -61,7 +64,7 @@ class ApiClient(
       }
     }
 
-  suspend fun search(baseUrl: String, image: ByteArray, topK: Int = 5): SearchResponse =
+  suspend fun search(baseUrl: String, image: ByteArray, topK: Int = DEFAULT_SEARCH_TOP_K): SearchResponse =
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       val body =
         MultipartBody.Builder()
@@ -73,6 +76,17 @@ class ApiClient(
       val request = Request.Builder().url("${normalizeBaseUrl(baseUrl)}/search").post(body).build()
       client.newCall(request).execute().use { response ->
         parseSearch(response.requireBodyText())
+      }
+    }
+
+  suspend fun downloadBytes(url: String): ByteArray =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+      val request = Request.Builder().url(url).get().build()
+      client.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          throw IOException("HTTP ${response.code}")
+        }
+        response.body?.bytes() ?: throw IOException("服务器返回为空")
       }
     }
 
@@ -88,6 +102,9 @@ class ApiClient(
   }
 
   companion object {
+    const val DEFAULT_SEARCH_TOP_K = 20
+    const val MAX_SEARCH_TOP_K = 100
+
     fun normalizeBaseUrl(value: String): String {
       val trimmed = value.trim().trimEnd('/')
       require(trimmed.isNotEmpty()) { "请先输入服务器地址" }
@@ -95,6 +112,17 @@ class ApiClient(
         trimmed
       } else {
         "http://$trimmed"
+      }
+    }
+
+    fun resolveUrl(baseUrl: String, url: String): String {
+      val value = url.trim()
+      if (value.startsWith("http://") || value.startsWith("https://")) return value
+      val base = normalizeBaseUrl(baseUrl)
+      return if (value.startsWith("/")) {
+        "$base$value"
+      } else {
+        "$base/$value"
       }
     }
 
@@ -125,9 +153,12 @@ class ApiClient(
             add(
               SearchResult(
                 rank = item.optInt("rank", index + 1),
+                imgId = item.optString("img_id", ""),
+                bloodId = item.optString("blood_id", ""),
                 bloodName = item.optString("blood_name", "未知品系"),
                 distance = item.optDouble("distance", Double.NaN),
                 pgId = item.optString("pg_id", "-"),
+                imageUrl = item.optString("image_url", ""),
               )
             )
           }

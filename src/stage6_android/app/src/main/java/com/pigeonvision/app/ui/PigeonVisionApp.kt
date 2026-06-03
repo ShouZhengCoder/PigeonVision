@@ -51,6 +51,7 @@ import com.pigeonvision.app.CompareResponse
 import com.pigeonvision.app.EyeCrop
 import com.pigeonvision.app.HealthResponse
 import com.pigeonvision.app.SearchResponse
+import com.pigeonvision.app.SearchImageLoader
 import com.pigeonvision.app.YoloDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -88,12 +89,15 @@ fun PigeonVisionApp(
   var compareA by remember { mutableStateOf<Bitmap?>(null) }
   var compareB by remember { mutableStateOf<Bitmap?>(null) }
   var searchImage by remember { mutableStateOf<Bitmap?>(null) }
+  var searchTopKText by rememberSaveable { mutableStateOf(ApiClient.DEFAULT_SEARCH_TOP_K.toString()) }
+  var searchPage by rememberSaveable { mutableIntStateOf(0) }
   var imageTarget by remember { mutableStateOf<ImageTarget?>(null) }
   var cameraUri by remember { mutableStateOf<Uri?>(null) }
   var healthState by remember { mutableStateOf<ActionState<HealthResponse>>(ActionState.Idle) }
   var compareState by remember { mutableStateOf<ActionState<CompareResponse>>(ActionState.Idle) }
   var searchState by remember { mutableStateOf<ActionState<SearchResponse>>(ActionState.Idle) }
   val scope = rememberCoroutineScope()
+  val searchImageLoader = remember { SearchImageLoader(apiClient) }
 
   LaunchedEffect(serverUrl) {
     prefs.edit().putString("server_url", serverUrl).apply()
@@ -112,6 +116,7 @@ fun PigeonVisionApp(
       ImageTarget.Search -> {
         searchImage = bitmap
         searchState = ActionState.Idle
+        searchPage = 0
       }
     }
   }
@@ -214,6 +219,7 @@ fun PigeonVisionApp(
 
   fun runSearch() {
     val image = searchImage
+    val topK = searchTopKText.toIntOrNull()
     if (serverUrl.isBlank()) {
       showToast("请先输入服务器地址")
       return
@@ -222,12 +228,17 @@ fun PigeonVisionApp(
       showToast("请选择一张图片")
       return
     }
+    if (topK == null || topK !in 1..ApiClient.MAX_SEARCH_TOP_K) {
+      showToast("Top-K 请输入 1 到 ${ApiClient.MAX_SEARCH_TOP_K}")
+      return
+    }
     scope.launch {
       searchState = ActionState.Loading
+      searchPage = 0
       searchState =
         try {
           val crop = cropOrThrow(detector, image, "检索图片")
-          ActionState.Success(apiClient.search(serverUrl, crop.jpegBytes, topK = 5))
+          ActionState.Success(apiClient.search(serverUrl, crop.jpegBytes, topK = topK))
         } catch (error: NoEyeDetectedException) {
           showToast("未检测到眼部，请靠近拍摄")
           ActionState.Error(error.message.orEmpty())
@@ -278,8 +289,19 @@ fun PigeonVisionApp(
           SearchScreen(
             image = searchImage,
             state = searchState,
+            serverUrl = serverUrl,
+            topKText = searchTopKText,
+            pageIndex = searchPage,
+            imageLoader = searchImageLoader,
             onPickImage = { chooseFromGallery(ImageTarget.Search) },
             onCameraImage = { takePhoto(ImageTarget.Search) },
+            onTopKChange = { value ->
+              if (value.length <= 3 && value.all(Char::isDigit)) {
+                searchTopKText = value
+                searchPage = 0
+              }
+            },
+            onPageChange = { page -> searchPage = page.coerceAtLeast(0) },
             onSearch = ::runSearch,
             modifier = Modifier.weight(1f),
           )

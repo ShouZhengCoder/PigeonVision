@@ -56,7 +56,7 @@ def load_img_index():
 - `pigeon.csv` has 11 columns: `ID, PID, CID, SID, NAME, COLOR, EYE, PG_ID, SEX, BLOOD, IMG`; field `weidth` in annotation JSONs is a typo for `width` — use as-is
 - MobileNetV2 expects 3-channel RGB input; grayscale iris images need `.convert("RGB")` before resize
 - Multi-label bloodlines: each image averages 6.4 blood_ids; evaluation must use blood_id overlap (not blood_name match) for accuracy
-- Best model: Concat 512d fusion (Triplet 256-dim + SupCon 256-dim concatenated)
+- Best model: Concat 1024d fusion (Triplet 256-dim + SupCon 256-dim + ArcFace 512-dim concatenated)
 
 ## Stage Status
 
@@ -68,7 +68,7 @@ Update this section as stages complete:
 - [x] Stage 3.5 — Rebuild pairs (`data/pairs_train.csv` rebuilt from full iris_normalized set)
 - [x] Stage 4 — Siamese training (`checkpoints/siamese/best.pt`, `outputs/features/`)
 - [x] Stage 5 — Flask server (`src/stage5_server/app.py`)
-- [ ] Stage 6 — Android deploy (`src/stage6_android/`)
+- [x] Stage 6 — Android deploy (`src/stage6_android/`)
 
 ## Critical Rules
 

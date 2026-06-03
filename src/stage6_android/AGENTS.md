@@ -23,8 +23,9 @@ Android 端**不做**虹膜分割和特征提取，只负责眼部检测和 HTTP
 ### 功能二：品种检索（Search）
 1. 用户选择或拍摄一张鸽子图片
 2. YOLO 检测，裁剪眼部
-3. POST 到服务端 `/search`，附带参数 `eye_crop=1`、`top_k=5`
-4. 展示 Top-5 结果列表：排名、品系名、距离
+3. POST 到服务端 `/search`，附带参数 `eye_crop=1`、`top_k=<用户输入>`
+4. 展示检索结果列表：排名、品系名、PG_ID、blood_id、img_id、距离和服务端图片缩略图
+5. Top-K 默认 20，可输入 1-100；结果每页 10 条分页展示
 
 ---
 
@@ -48,13 +49,16 @@ multipart/form-data:
 ```
 multipart/form-data:
   image: <JPEG bytes>     # 眼部裁剪图
-  top_k: "5"
+  top_k: "20"
   eye_crop: "1"
 ```
 返回：
 ```json
-{"results": [{"rank":1, "blood_name":"桑杰士", "distance":0.21, "pg_id":"NL15-1273729"}, ...]}
+{"results": [{"rank":1, "img_id":"571835", "blood_id":"B01-123", "blood_name":"桑杰士", "distance":0.21, "pg_id":"NL15-1273729", "image_url":"/image/571835"}, ...]}
 ```
+
+### GET /image/<img_id>
+返回 `outputs/img_index.csv` 中对应的原始鸽眼图，Android 端用于检索结果缩略图展示。
 
 ### GET /health
 返回：`{"status": "ok", "gallery_size": 22043}`
@@ -108,8 +112,9 @@ MainActivity（单 Activity）
 │   └── 结果展示：距离值 + "同一品种 ✅" 或 "不同品种 ❌"
 └── Tab 2：Search
     ├── 一个图片选择区
+    ├── Top-K 输入框（默认20，范围1-100）
     ├── 「开始检索」按钮
-    └── 结果列表（LazyColumn）：排名 | 品系名 | 距离
+    └── 结果列表（LazyColumn）：缩略图 | 排名 | 品系名 | PG_ID | 距离，超过10条分页
 ```
 
 ---

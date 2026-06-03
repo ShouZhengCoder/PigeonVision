@@ -34,6 +34,8 @@ FUSION_ENCODERS = [
     (ROOT / "checkpoints" / "siamese" / "arcface_v2" / "best.pt", 512, "resnet50"),
 ]
 FUSION_DEFAULT_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full"
+DEFAULT_SEARCH_TOP_K = 20
+MAX_SEARCH_TOP_K = 100
 
 
 class IrisPipeline:
@@ -47,6 +49,7 @@ class IrisPipeline:
         threshold_path: str | Path = ROOT / "outputs" / "features" / "threshold.json",
         siamese_config_path: str | Path = ROOT / "configs" / "siamese.yaml",
         unet_config_path: str | Path = ROOT / "configs" / "unet.yaml",
+        img_index_path: str | Path = ROOT / "outputs" / "img_index.csv",
         detection_confidence: float = 0.7,
         detection_expand_ratio: float = 0.1,
         device: str | torch.device | None = None,
@@ -59,20 +62,22 @@ class IrisPipeline:
         self.segmentation_checkpoint = self._resolve(segmentation_checkpoint)
         self.siamese_config_path = self._resolve(siamese_config_path)
         self.unet_config_path = self._resolve(unet_config_path)
+        self.img_index_path = self._resolve(img_index_path)
 
         self.siamese_config = self._load_yaml(self.siamese_config_path)
         self.unet_config = self._load_yaml(self.unet_config_path)
         self.detection_confidence = float(detection_confidence)
         self.detection_expand_ratio = float(detection_expand_ratio)
 
-        # In fusion mode, use the 1024d feature DB by default
+        # In fusion mode, the service must use the matching 1024d gallery.
         if self.fusion:
-            faiss_index_path = self._resolve(faiss_index_path)
-            feature_meta_path = self._resolve(feature_meta_path)
-            threshold_path = self._resolve(threshold_path)
-            if not Path(faiss_index_path).exists() and FUSION_DEFAULT_DIR.exists():
-                faiss_index_path = FUSION_DEFAULT_DIR / "faiss_index.bin"
-                feature_meta_path = FUSION_DEFAULT_DIR / "feature_db_meta.csv"
+            faiss_index_path = FUSION_DEFAULT_DIR / "faiss_index.bin"
+            feature_meta_path = FUSION_DEFAULT_DIR / "feature_db_meta.csv"
+            # Use fusion-specific threshold if available, fall back to global threshold.
+            fusion_threshold = FUSION_DEFAULT_DIR / "threshold.json"
+            if fusion_threshold.exists():
+                threshold_path = fusion_threshold
+            else:
                 threshold_path = ROOT / "outputs" / "features" / "threshold.json"
 
         self.faiss_index_path = self._resolve(faiss_index_path)
@@ -84,6 +89,7 @@ class IrisPipeline:
         self.segmenter = self._load_segmenter()
         self.index = self._load_faiss_index()
         self.meta = self._load_feature_meta()
+        self.img_index = self._load_img_index()
         self._validate_index_meta()
 
         self.input_shape = tuple(int(v) for v in self.siamese_config.get("input_shape", NORMALIZED_SHAPE))
@@ -104,9 +110,9 @@ class IrisPipeline:
             return 0
         return int(self.meta["blood_name"].fillna("").astype(str).nunique())
 
-    def encode(self, img_bytes: bytes) -> np.ndarray:
+    def encode(self, img_bytes: bytes, eye_crop: bool = False) -> np.ndarray:
         image_bgr = self._decode_image(img_bytes)
-        normalized_bgr = self._prepare_normalized_iris(image_bgr)
+        normalized_bgr = self._prepare_normalized_iris(image_bgr, eye_crop=eye_crop)
         tensor = self._normalized_bgr_to_tensor(normalized_bgr).to(self.device)
         with torch.no_grad():
             if len(self.encoders) == 1:
@@ -123,11 +129,15 @@ class IrisPipeline:
             raise ValueError("编码失败：embedding 范数为 0")
         return (embedding / norm).astype(np.float32)
 
-    def _prepare_normalized_iris(self, image_bgr: np.ndarray) -> np.ndarray:
+    def _prepare_normalized_iris(self, image_bgr: np.ndarray, eye_crop: bool = False) -> np.ndarray:
         height, width = image_bgr.shape[:2]
+        # Case 1: already a normalized iris strip (aspect ratio >= 4:1)
         if height > 0 and width / height >= 4.0:
             return image_bgr
-
+        # Case 2: caller confirms this is already an eye crop (e.g. from Android YOLO)
+        if eye_crop:
+            return self._segment_and_normalize(image_bgr)
+        # Case 3: full pigeon image — run YOLO detection first
         eye_bgr = self._detect_eye_crop(image_bgr)
         return self._segment_and_normalize(eye_bgr)
 
@@ -192,9 +202,9 @@ class IrisPipeline:
             raise ValueError("眼部检测失败：检测框无效")
         return image_bgr[ey1:ey2, ex1:ex2].copy()
 
-    def compare(self, img_bytes_a: bytes, img_bytes_b: bytes) -> dict[str, Any]:
-        feat_a = self.encode(img_bytes_a)
-        feat_b = self.encode(img_bytes_b)
+    def compare(self, img_bytes_a: bytes, img_bytes_b: bytes, eye_crop: bool = False) -> dict[str, Any]:
+        feat_a = self.encode(img_bytes_a, eye_crop=eye_crop)
+        feat_b = self.encode(img_bytes_b, eye_crop=eye_crop)
         distance = float(np.linalg.norm(feat_a - feat_b))
         return {
             "distance": distance,
@@ -202,10 +212,11 @@ class IrisPipeline:
             "threshold": float(self.threshold),
         }
 
-    def search(self, img_bytes: bytes, top_k: int = 10) -> list[dict[str, Any]]:
+    def search(self, img_bytes: bytes, top_k: int = DEFAULT_SEARCH_TOP_K, eye_crop: bool = False) -> list[dict[str, Any]]:
         if top_k <= 0:
             raise ValueError("top_k 必须大于 0")
-        feature = self.encode(img_bytes).reshape(1, -1).astype(np.float32)
+        top_k = min(int(top_k), MAX_SEARCH_TOP_K)
+        feature = self.encode(img_bytes, eye_crop=eye_crop).reshape(1, -1).astype(np.float32)
         k = min(int(top_k), int(self.index.ntotal))
         distances, indices = self.index.search(feature, k)
 
@@ -225,6 +236,21 @@ class IrisPipeline:
                 item["pg_id"] = str(row.get("pg_id", ""))
             results.append(item)
         return results
+
+    def gallery_image_path(self, img_id: str) -> Path | None:
+        path = self.img_index.get(str(img_id))
+        if path is None:
+            return None
+        if path.is_file():
+            return path
+
+        marker = "PigeonVision/"
+        raw = str(path)
+        if marker in raw:
+            relocated = ROOT / raw.split(marker, 1)[1]
+            if relocated.is_file():
+                return relocated
+        return None
 
     def _load_encoders(self) -> list[IrisEncoder]:
         if not self.fusion:
@@ -284,11 +310,25 @@ class IrisPipeline:
         if not self.feature_meta_path.exists():
             raise FileNotFoundError(f"缺少特征库元数据：{self.feature_meta_path}")
         meta = pd.read_csv(self.feature_meta_path, dtype=str).fillna("")
-        required = {"img_id", "blood_id", "blood_name"}
+        required = {"img_id", "blood_name"}
         missing = required - set(meta.columns)
         if missing:
             raise ValueError(f"{self.feature_meta_path} 缺少列：{sorted(missing)}")
         return meta.reset_index(drop=True)
+
+    def _load_img_index(self) -> dict[str, Path]:
+        if not self.img_index_path.exists():
+            raise FileNotFoundError(f"缺少图片索引：{self.img_index_path}")
+        index = pd.read_csv(self.img_index_path, dtype=str).fillna("")
+        required = {"img_id", "path"}
+        missing = required - set(index.columns)
+        if missing:
+            raise ValueError(f"{self.img_index_path} 缺少列：{sorted(missing)}")
+        return {
+            str(row.img_id): Path(str(row.path))
+            for row in index.itertuples(index=False)
+            if str(row.img_id) and str(row.path)
+        }
 
     def _validate_index_meta(self) -> None:
         if int(self.index.ntotal) != len(self.meta):
