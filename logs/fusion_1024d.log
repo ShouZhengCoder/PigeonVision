@@ -1,0 +1,33 @@
+Loading encoders...
+Gallery: 7196, Query: 2526
+
+Extracting triplet (256d)...
+gallery triplet:   0%|          | 0/57 [00:00<?, ?it/s]gallery triplet:   2%|▏         | 1/57 [00:01<01:28,  1.57s/it]gallery triplet:   9%|▉         | 5/57 [00:02<00:18,  2.82it/s]gallery triplet:  16%|█▌        | 9/57 [00:02<00:12,  3.94it/s]gallery triplet:  23%|██▎       | 13/57 [00:03<00:09,  4.57it/s]gallery triplet:  30%|██▉       | 17/57 [00:04<00:09,  4.29it/s]gallery triplet:  37%|███▋      | 21/57 [00:05<00:07,  4.54it/s]gallery triplet:  44%|████▍     | 25/57 [00:05<00:06,  5.06it/s]gallery triplet:  51%|█████     | 29/57 [00:06<00:05,  5.11it/s]gallery triplet:  58%|█████▊    | 33/57 [00:07<00:04,  5.77it/s]gallery triplet:  65%|██████▍   | 37/57 [00:07<00:03,  5.59it/s]gallery triplet:  72%|███████▏  | 41/57 [00:08<00:02,  5.98it/s]gallery triplet:  79%|███████▉  | 45/57 [00:09<00:02,  5.75it/s]gallery triplet:  86%|████████▌ | 49/57 [00:09<00:01,  6.19it/s]gallery triplet:  93%|█████████▎| 53/57 [00:10<00:00,  5.75it/s]gallery triplet: 100%|██████████| 57/57 [00:10<00:00,  5.29it/s]
+query triplet:   0%|          | 0/20 [00:00<?, ?it/s]query triplet:   5%|▌         | 1/20 [00:00<00:17,  1.07it/s]query triplet:  20%|██        | 4/20 [00:01<00:03,  4.82it/s]query triplet:  30%|███       | 6/20 [00:01<00:03,  4.43it/s]query triplet:  45%|████▌     | 9/20 [00:02<00:02,  4.32it/s]query triplet:  65%|██████▌   | 13/20 [00:02<00:01,  5.31it/s]query triplet:  70%|███████   | 14/20 [00:02<00:01,  5.66it/s]query triplet:  85%|████████▌ | 17/20 [00:03<00:00,  5.04it/s]query triplet:  95%|█████████▌| 19/20 [00:03<00:00,  6.28it/s]query triplet: 100%|██████████| 20/20 [00:03<00:00,  5.25it/s]
+
+Extracting supcon (256d)...
+gallery supcon:   0%|          | 0/57 [00:00<?, ?it/s]gallery supcon:   2%|▏         | 1/57 [00:00<00:38,  1.46it/s]gallery supcon:   9%|▉         | 5/57 [00:01<00:12,  4.13it/s]gallery supcon:  16%|█▌        | 9/57 [00:01<00:08,  5.61it/s]gallery supcon:  23%|██▎       | 13/57 [00:02<00:07,  5.73it/s]gallery supcon:  30%|██▉       | 17/57 [00:03<00:06,  6.50it/s]gallery supcon:  37%|███▋      | 21/57 [00:03<00:05,  6.15it/s]gallery supcon:  44%|████▍     | 25/57 [00:04<00:04,  6.83it/s]gallery supcon:  51%|█████     | 29/57 [00:04<00:03,  7.30it/s]gallery supcon:  58%|█████▊    | 33/57 [00:05<00:03,  6.72it/s]gallery supcon:  65%|██████▍   | 37/57 [00:06<00:03,  5.67it/s]gallery supcon:  72%|███████▏  | 41/57 [00:06<00:02,  6.27it/s]gallery supcon:  79%|███████▉  | 45/57 [00:07<00:01,  6.91it/s]gallery supcon:  86%|████████▌ | 49/57 [00:07<00:01,  7.40it/s]gallery supcon:  93%|█████████▎| 53/57 [00:08<00:00,  6.51it/s]gallery supcon: 100%|██████████| 57/57 [00:08<00:00,  6.66it/s]
+query supcon:   0%|          | 0/20 [00:00<?, ?it/s]query supcon:   5%|▌         | 1/20 [00:00<00:12,  1.54it/s]query supcon:  25%|██▌       | 5/20 [00:01<00:03,  4.06it/s]query supcon:  45%|████▌     | 9/20 [00:01<00:02,  5.17it/s]query supcon:  65%|██████▌   | 13/20 [00:02<00:01,  6.30it/s]query supcon:  75%|███████▌  | 15/20 [00:02<00:00,  7.53it/s]query supcon:  85%|████████▌ | 17/20 [00:02<00:00,  7.02it/s]query supcon: 100%|██████████| 20/20 [00:02<00:00,  9.48it/s]query supcon: 100%|██████████| 20/20 [00:02<00:00,  6.67it/s]
+
+Extracting arcface (512d)...
+gallery arcface:   0%|          | 0/57 [00:00<?, ?it/s]gallery arcface:   2%|▏         | 1/57 [00:00<00:41,  1.35it/s]gallery arcface:   7%|▋         | 4/57 [00:00<00:09,  5.86it/s]gallery arcface:  11%|█         | 6/57 [00:01<00:08,  5.97it/s]gallery arcface:  16%|█▌        | 9/57 [00:01<00:07,  6.57it/s]gallery arcface:  21%|██        | 12/57 [00:01<00:04,  9.53it/s]gallery arcface:  25%|██▍       | 14/57 [00:02<00:05,  7.62it/s]gallery arcface:  30%|██▉       | 17/57 [00:02<00:05,  7.33it/s]gallery arcface:  35%|███▌      | 20/57 [00:02<00:03,  9.84it/s]gallery arcface:  39%|███▊      | 22/57 [00:03<00:04,  8.16it/s]gallery arcface:  44%|████▍     | 25/57 [00:04<00:06,  4.92it/s]gallery arcface:  49%|████▉     | 28/57 [00:04<00:04,  6.76it/s]gallery arcface:  53%|█████▎    | 30/57 [00:04<00:04,  6.18it/s]gallery arcface:  58%|█████▊    | 33/57 [00:05<00:03,  6.45it/s]gallery arcface:  63%|██████▎   | 36/57 [00:05<00:02,  8.59it/s]gallery arcface:  67%|██████▋   | 38/57 [00:05<00:02,  6.36it/s]gallery arcface:  72%|███████▏  | 41/57 [00:06<00:02,  6.56it/s]gallery arcface:  77%|███████▋  | 44/57 [00:06<00:01,  8.71it/s]gallery arcface:  81%|████████  | 46/57 [00:06<00:01,  7.29it/s]gallery arcface:  86%|████████▌ | 49/57 [00:07<00:01,  7.26it/s]gallery arcface:  91%|█████████ | 52/57 [00:07<00:00,  9.54it/s]gallery arcface:  95%|█████████▍| 54/57 [00:07<00:00,  7.71it/s]gallery arcface: 100%|██████████| 57/57 [00:07<00:00,  9.88it/s]gallery arcface: 100%|██████████| 57/57 [00:07<00:00,  7.32it/s]
+query arcface:   0%|          | 0/20 [00:00<?, ?it/s]query arcface:   5%|▌         | 1/20 [00:00<00:13,  1.40it/s]query arcface:  20%|██        | 4/20 [00:00<00:02,  6.08it/s]query arcface:  30%|███       | 6/20 [00:01<00:02,  5.41it/s]query arcface:  45%|████▌     | 9/20 [00:02<00:02,  4.15it/s]query arcface:  60%|██████    | 12/20 [00:02<00:01,  6.35it/s]query arcface:  70%|███████   | 14/20 [00:02<00:00,  6.01it/s]query arcface:  85%|████████▌ | 17/20 [00:03<00:00,  6.32it/s]query arcface: 100%|██████████| 20/20 [00:03<00:00,  8.42it/s]query arcface: 100%|██████████| 20/20 [00:03<00:00,  6.16it/s]
+
+Fused dimension: 1024
+warning: skipped malformed rows while reading /home/u2023312335/project/learn/PigeonVision/data/extracted/datasetXGN/pigeon.csv
+
+Evaluating...
+
+============================================================
+Concat 1024d Fusion (multi-label blood_id)
+============================================================
+  search_recall_at_1       : 0.3547
+  search_recall_at_5       : 0.5392
+  search_recall_at_10      : 0.6132
+  search_mAP               : 0.2514
+  compare_accuracy          : 0.7296
+  compare_balanced_accuracy : 0.7296
+  compare_auc               : 0.8050
+  compare_eer               : 0.2776
+
+Saved to /home/u2023312335/project/learn/PigeonVision/outputs/features/fusion_1024d/

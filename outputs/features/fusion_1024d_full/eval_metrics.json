@@ -1,0 +1,17 @@
+{
+  "fusion": "triplet_256d + supcon_256d + arcface_512d",
+  "total_dim": 1024,
+  "search": {
+    "recall_at_1": 0.355285,
+    "recall_at_5": 0.520068,
+    "recall_at_10": 0.591012,
+    "mAP": 0.161928
+  },
+  "compare": {
+    "accuracy": 0.668805,
+    "balanced_accuracy": 0.668805,
+    "auc": 0.730761,
+    "eer": 0.34242,
+    "threshold": 2.348179
+  }
+}

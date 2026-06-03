@@ -1,0 +1,29 @@
+2026-05-31 16:19:15,109 INFO warm-start from /home/u2023312335/project/learn/PigeonVision/checkpoints/siamese/best.pt
+2026-05-31 16:19:43,289 INFO epoch=1 loss=2.0234 lr=0.000010 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.5111 best=1
+2026-05-31 16:20:09,262 INFO epoch=2 loss=1.5154 lr=0.000082 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4994 best=1
+2026-05-31 16:20:26,583 INFO epoch=3 loss=0.9227 lr=0.000155 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:20:53,188 INFO epoch=4 loss=0.7781 lr=0.000227 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4911 best=1
+2026-05-31 16:21:10,787 INFO epoch=5 loss=0.7103 lr=0.000300 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:21:37,485 INFO epoch=6 loss=0.6506 lr=0.000300 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4837 best=1
+2026-05-31 16:21:54,946 INFO epoch=7 loss=0.5748 lr=0.000299 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:22:21,490 INFO epoch=8 loss=0.5997 lr=0.000299 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4879 best=1
+2026-05-31 16:22:38,151 INFO epoch=9 loss=0.5521 lr=0.000298 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:23:05,675 INFO epoch=10 loss=0.4698 lr=0.000297 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4856 best=1
+2026-05-31 16:23:22,551 INFO epoch=11 loss=0.4653 lr=0.000295 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:23:49,311 INFO epoch=12 loss=0.4502 lr=0.000294 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4886 best=1
+2026-05-31 16:24:05,472 INFO epoch=13 loss=0.4375 lr=0.000292 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:24:31,213 INFO epoch=14 loss=0.3804 lr=0.000289 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4891 best=1
+2026-05-31 16:24:47,520 INFO epoch=15 loss=0.3588 lr=0.000287 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:25:15,199 INFO epoch=16 loss=0.3473 lr=0.000284 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4865 best=1
+2026-05-31 16:25:32,429 INFO epoch=17 loss=0.3174 lr=0.000281 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:25:59,402 INFO epoch=18 loss=0.2919 lr=0.000278 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4902 best=1
+2026-05-31 16:26:15,803 INFO epoch=19 loss=0.3374 lr=0.000275 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:26:42,508 INFO epoch=20 loss=0.3233 lr=0.000271 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4890 best=1
+2026-05-31 16:27:00,790 INFO epoch=21 loss=0.2737 lr=0.000268 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:27:51,794 INFO epoch=22 loss=0.3061 lr=0.000264 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4834 best=1
+2026-05-31 16:28:10,677 INFO epoch=23 loss=0.2726 lr=0.000259 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:28:37,567 INFO epoch=24 loss=0.2721 lr=0.000255 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4866 best=1
+2026-05-31 16:28:55,126 INFO epoch=25 loss=0.2715 lr=0.000250 ml_r1=0.0000 ml_r5=0.0000 ml_mAP=0.0000 best=0
+2026-05-31 16:29:23,279 INFO epoch=26 loss=0.2686 lr=0.000246 ml_r1=1.0000 ml_r5=1.0000 ml_mAP=0.4863 best=1
+2026-05-31 16:29:23,280 INFO early stop epoch=26 best=1
+2026-05-31 16:29:23,500 INFO done. best_epoch=1 best_ml_r1=1.0000

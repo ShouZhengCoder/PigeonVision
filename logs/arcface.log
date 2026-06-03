@@ -1,0 +1,18 @@
+2026-06-01 00:54:53,641 INFO training from scratch (backbone=resnet50, dim=512)
+2026-06-01 00:54:53,681 INFO classes=6626 dim=512 backbone=resnet50 lr=0.000100 s=30.0 m=0.50
+2026-06-01 01:00:08,506 INFO training from scratch (backbone=resnet50, dim=512)
+2026-06-01 01:00:08,537 INFO classes=6626 dim=512 backbone=resnet50 lr=0.000100 s=30.0 m=0.50
+2026-06-01 01:00:39,138 INFO epoch=1 loss=0.5186 lr=0.000010 x_r1=0.0000 x_r5=0.0000 x_mAP=0.0000 best=1
+2026-06-01 01:01:17,451 INFO epoch=2 loss=0.1408 lr=0.000033 x_r1=0.0099 x_r5=0.0389 x_mAP=0.0109 best=1
+2026-06-01 01:01:45,840 INFO epoch=3 loss=0.1049 lr=0.000055 x_r1=0.0000 x_r5=0.0000 x_mAP=0.0000 best=0
+2026-06-01 01:02:25,044 INFO epoch=4 loss=0.0672 lr=0.000077 x_r1=0.0073 x_r5=0.0336 x_mAP=0.0113 best=1
+2026-06-01 01:02:53,357 INFO epoch=5 loss=0.0559 lr=0.000100 x_r1=0.0000 x_r5=0.0000 x_mAP=0.0000 best=0
+2026-06-01 01:03:32,636 INFO epoch=6 loss=0.0523 lr=0.000100 x_r1=0.0115 x_r5=0.0412 x_mAP=0.0111 best=0
+2026-06-01 01:04:00,714 INFO epoch=7 loss=0.0630 lr=0.000099 x_r1=0.0000 x_r5=0.0000 x_mAP=0.0000 best=0
+2026-06-01 01:04:44,675 INFO epoch=8 loss=0.0482 lr=0.000098 x_r1=0.0118 x_r5=0.0336 x_mAP=0.0096 best=0
+2026-06-01 01:05:12,593 INFO epoch=9 loss=0.0489 lr=0.000097 x_r1=0.0000 x_r5=0.0000 x_mAP=0.0000 best=0
+2026-06-01 01:05:54,866 INFO epoch=10 loss=0.0500 lr=0.000095 x_r1=0.0122 x_r5=0.0412 x_mAP=0.0118 best=1
+2026-06-01 01:06:24,935 INFO epoch=11 loss=0.0480 lr=0.000093 x_r1=0.0000 x_r5=0.0000 x_mAP=0.0000 best=0
+2026-06-01 01:07:09,022 INFO epoch=12 loss=0.0479 lr=0.000090 x_r1=0.0115 x_r5=0.0504 x_mAP=0.0119 best=1
+2026-06-01 01:07:40,479 INFO epoch=13 loss=0.0487 lr=0.000088 x_r1=0.0000 x_r5=0.0000 x_mAP=0.0000 best=0
+2026-06-01 01:08:22,154 INFO epoch=14 loss=0.0467 lr=0.000085 x_r1=0.0122 x_r5=0.0431 x_mAP=0.0123 best=1

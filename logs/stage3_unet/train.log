@@ -1,0 +1,10 @@
+2026-05-23 17:49:19,694 INFO device=cuda train_samples=8 val_samples=4 epochs=1 batch_size=4 lr=0.0003
+2026-05-23 17:49:21,874 INFO epoch=1 train_loss=1.893343 val_loss=1.538134 train_dice_fg=0.060801 val_dice_fg=0.410007 train_iou_fg=0.032294 val_iou_fg=0.324583 best=1
+2026-05-23 17:49:21,874 INFO training finished best_dice_fg=0.410007 checkpoint=/home/u2023312335/project/learn/PigeonVision/checkpoints/segmentation/best.pt
+2026-05-23 17:52:14,077 INFO device=cuda train_samples=64 val_samples=16 epochs=5 batch_size=4 lr=0.0003
+2026-05-23 17:52:16,341 INFO epoch=1 train_loss=1.354031 val_loss=1.067076 train_dice_fg=0.430290 val_dice_fg=0.668202 train_iou_fg=0.326056 val_iou_fg=0.531191 best=1
+2026-05-23 17:52:18,393 INFO epoch=2 train_loss=0.964629 val_loss=0.857552 train_dice_fg=0.684505 val_dice_fg=0.731250 train_iou_fg=0.544555 val_iou_fg=0.592860 best=1
+2026-05-23 17:52:20,130 INFO epoch=3 train_loss=0.822603 val_loss=0.732681 train_dice_fg=0.754415 val_dice_fg=0.806805 train_iou_fg=0.617597 val_iou_fg=0.682295 best=1
+2026-05-23 17:52:22,435 INFO epoch=4 train_loss=0.759266 val_loss=0.700589 train_dice_fg=0.783285 val_dice_fg=0.843940 train_iou_fg=0.652311 val_iou_fg=0.733149 best=1
+2026-05-23 17:52:23,656 INFO epoch=5 train_loss=0.723583 val_loss=0.711022 train_dice_fg=0.815484 val_dice_fg=0.798465 train_iou_fg=0.693982 val_iou_fg=0.672758 best=0
+2026-05-23 17:52:23,656 INFO training finished best_dice_fg=0.843940 checkpoint=/home/u2023312335/project/learn/PigeonVision/checkpoints/segmentation/best.pt
