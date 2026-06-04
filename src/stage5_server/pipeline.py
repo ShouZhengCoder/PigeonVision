@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import base64
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
+
+# macOS conda may load libomp through multiple ML wheels; keep the demo server alive.
+if sys.platform == "darwin":
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+for thread_env in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(thread_env, "1")
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 import cv2
 import faiss
@@ -11,7 +20,6 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from ultralytics import YOLO
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,7 +32,29 @@ for import_dir in (STAGE4_DIR, STAGE3_DIR):
 
 from iris_localize import UNetPredictor, daugman_normalize_color  # noqa: E402
 from model import IrisEncoder  # noqa: E402
-from unet_common import DEFAULT_MASK_CONFIDENCE, NORMALIZED_SHAPE, IrisSegmentationSuccess  # noqa: E402
+from unet_common import DEFAULT_MASK_CONFIDENCE, NORMALIZED_SHAPE, IrisSegmentationSuccess, ellipse_to_cv2  # noqa: E402
+
+
+def _configure_native_threads() -> None:
+    try:
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
+    try:
+        faiss.omp_set_num_threads(1)
+    except Exception:
+        pass
+    try:
+        torch.set_num_threads(1)
+    except Exception:
+        pass
+    try:
+        torch.set_num_interop_threads(1)
+    except Exception:
+        pass
+
+
+_configure_native_threads()
 
 
 # Default fusion config: (checkpoint, feat_dim, backbone)
@@ -84,7 +114,7 @@ class IrisPipeline:
         self.feature_meta_path = self._resolve(feature_meta_path)
         self.threshold_path = self._resolve(threshold_path)
         self.threshold = self._load_threshold(self.threshold_path)
-        self.detector = self._load_detector()
+        self.detector = None
         self.encoders = self._load_encoders()
         self.segmenter = self._load_segmenter()
         self.index = self._load_faiss_index()
@@ -110,9 +140,23 @@ class IrisPipeline:
             return 0
         return int(self.meta["blood_name"].fillna("").astype(str).nunique())
 
-    def encode(self, img_bytes: bytes, eye_crop: bool = False) -> np.ndarray:
+    def encode(self, img_bytes: bytes, eye_crop: bool = False) -> tuple[np.ndarray, str, str, str]:
         image_bgr = self._decode_image(img_bytes)
-        normalized_bgr = self._prepare_normalized_iris(image_bgr, eye_crop=eye_crop)
+        normalized_bgr, eye_crop_bgr, iris_region_bgr = self._prepare_normalized_iris(image_bgr, eye_crop=eye_crop)
+        normalized_bgr = self._ensure_display_normalized_shape(normalized_bgr)
+        normalized_b64 = self._encode_image_b64(normalized_bgr, ".png")
+        eye_crop_b64 = self._encode_image_b64(
+            eye_crop_bgr,
+            ".jpg",
+            params=[int(cv2.IMWRITE_JPEG_QUALITY), 95],
+        )
+        iris_region_b64 = ""
+        if iris_region_bgr is not None:
+            iris_region_b64 = self._encode_image_b64(
+                iris_region_bgr,
+                ".jpg",
+                params=[int(cv2.IMWRITE_JPEG_QUALITY), 95],
+            )
         tensor = self._normalized_bgr_to_tensor(normalized_bgr).to(self.device)
         with torch.no_grad():
             if len(self.encoders) == 1:
@@ -127,21 +171,27 @@ class IrisPipeline:
         norm = float(np.linalg.norm(embedding))
         if norm <= 1e-12:
             raise ValueError("编码失败：embedding 范数为 0")
-        return (embedding / norm).astype(np.float32)
+        return (embedding / norm).astype(np.float32), normalized_b64, eye_crop_b64, iris_region_b64
 
-    def _prepare_normalized_iris(self, image_bgr: np.ndarray, eye_crop: bool = False) -> np.ndarray:
+    def _prepare_normalized_iris(
+        self,
+        image_bgr: np.ndarray,
+        eye_crop: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         height, width = image_bgr.shape[:2]
         # Case 1: already a normalized iris strip (aspect ratio >= 4:1)
         if height > 0 and width / height >= 4.0:
-            return image_bgr
+            return image_bgr, image_bgr, None
         # Case 2: caller confirms this is already an eye crop (e.g. from Android YOLO)
         if eye_crop:
-            return self._segment_and_normalize(image_bgr)
+            normalized_bgr, iris_region_bgr = self._segment_and_normalize(image_bgr)
+            return normalized_bgr, image_bgr, iris_region_bgr
         # Case 3: full pigeon image — run YOLO detection first
         eye_bgr = self._detect_eye_crop(image_bgr)
-        return self._segment_and_normalize(eye_bgr)
+        normalized_bgr, iris_region_bgr = self._segment_and_normalize(eye_bgr)
+        return normalized_bgr, eye_bgr, iris_region_bgr
 
-    def _segment_and_normalize(self, eye_bgr: np.ndarray) -> np.ndarray:
+    def _segment_and_normalize(self, eye_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray | None]:
         prediction = self.segmenter.predict(
             eye_bgr,
             mask_confidence_threshold=float(DEFAULT_MASK_CONFIDENCE),
@@ -158,12 +208,49 @@ class IrisPipeline:
             )
 
         try:
-            return daugman_normalize_color(eye_bgr, prediction, shape=NORMALIZED_SHAPE)
+            iris_region_bgr = self._extract_iris_region(eye_bgr, prediction)
+        except Exception as exc:
+            print(f"[warn] 虹膜区域提取失败，跳过展示图：{exc}", file=sys.stderr)
+            iris_region_bgr = None
+        try:
+            normalized_bgr = daugman_normalize_color(eye_bgr, prediction, shape=NORMALIZED_SHAPE)
         except Exception as exc:
             raise ValueError(f"虹膜展开失败：{exc}") from exc
+        return normalized_bgr, iris_region_bgr
+
+    @staticmethod
+    def _extract_iris_region(eye_bgr: np.ndarray, prediction: IrisSegmentationSuccess) -> np.ndarray:
+        input_size = int(prediction.input_size)
+        if eye_bgr.ndim == 2:
+            resized_bgr = cv2.cvtColor(eye_bgr, cv2.COLOR_GRAY2BGR)
+        else:
+            resized_bgr = eye_bgr
+        resized_bgr = cv2.resize(resized_bgr, (input_size, input_size), interpolation=cv2.INTER_AREA)
+
+        iris_mask = ((prediction.mask == 1).astype(np.uint8)) * 255
+        if not np.any(iris_mask):
+            iris_mask = np.zeros((input_size, input_size), dtype=np.uint8)
+            cv2.ellipse(iris_mask, ellipse_to_cv2(prediction.iris), 255, thickness=-1)
+
+        extracted = np.zeros_like(resized_bgr)
+        extracted[iris_mask > 0] = resized_bgr[iris_mask > 0]
+        cv2.ellipse(extracted, ellipse_to_cv2(prediction.iris), (0, 165, 255), 1, lineType=cv2.LINE_AA)
+
+        ys, xs = np.where(iris_mask > 0)
+        if ys.size == 0 or xs.size == 0:
+            return extracted
+        pad = max(8, int(round(max(float(prediction.iris.a), float(prediction.iris.b)) * 0.12)))
+        x1 = max(0, int(xs.min()) - pad)
+        x2 = min(input_size, int(xs.max()) + pad + 1)
+        y1 = max(0, int(ys.min()) - pad)
+        y2 = min(input_size, int(ys.max()) + pad + 1)
+        if x2 <= x1 or y2 <= y1:
+            return extracted
+        return extracted[y1:y2, x1:x2].copy()
 
     def _detect_eye_crop(self, image_bgr: np.ndarray) -> np.ndarray:
-        results = self.detector.predict(
+        detector = self._get_detector()
+        results = detector.predict(
             source=image_bgr,
             conf=self.detection_confidence,
             verbose=False,
@@ -202,21 +289,33 @@ class IrisPipeline:
             raise ValueError("眼部检测失败：检测框无效")
         return image_bgr[ey1:ey2, ex1:ex2].copy()
 
+    def _get_detector(self):
+        if self.detector is None:
+            self.detector = self._load_detector()
+        return self.detector
+
     def compare(self, img_bytes_a: bytes, img_bytes_b: bytes, eye_crop: bool = False) -> dict[str, Any]:
-        feat_a = self.encode(img_bytes_a, eye_crop=eye_crop)
-        feat_b = self.encode(img_bytes_b, eye_crop=eye_crop)
+        feat_a, normalized_a, eye_crop_a, iris_region_a = self.encode(img_bytes_a, eye_crop=eye_crop)
+        feat_b, normalized_b, eye_crop_b, iris_region_b = self.encode(img_bytes_b, eye_crop=eye_crop)
         distance = float(np.linalg.norm(feat_a - feat_b))
         return {
             "distance": distance,
             "same_family": bool(distance < self.threshold),
             "threshold": float(self.threshold),
+            "eye_crop_a": eye_crop_a,
+            "iris_region_a": iris_region_a,
+            "normalized_a": normalized_a,
+            "eye_crop_b": eye_crop_b,
+            "iris_region_b": iris_region_b,
+            "normalized_b": normalized_b,
         }
 
-    def search(self, img_bytes: bytes, top_k: int = DEFAULT_SEARCH_TOP_K, eye_crop: bool = False) -> list[dict[str, Any]]:
+    def search(self, img_bytes: bytes, top_k: int = DEFAULT_SEARCH_TOP_K, eye_crop: bool = False) -> dict[str, Any]:
         if top_k <= 0:
             raise ValueError("top_k 必须大于 0")
         top_k = min(int(top_k), MAX_SEARCH_TOP_K)
-        feature = self.encode(img_bytes, eye_crop=eye_crop).reshape(1, -1).astype(np.float32)
+        embedding, normalized_b64, eye_crop_b64, iris_region_b64 = self.encode(img_bytes, eye_crop=eye_crop)
+        feature = embedding.reshape(1, -1).astype(np.float32)
         k = min(int(top_k), int(self.index.ntotal))
         distances, indices = self.index.search(feature, k)
 
@@ -235,22 +334,43 @@ class IrisPipeline:
             if "pg_id" in row.index:
                 item["pg_id"] = str(row.get("pg_id", ""))
             results.append(item)
-        return results
+        return {
+            "results": results,
+            "eye_crop": eye_crop_b64,
+            "iris_region": iris_region_b64,
+            "normalized": normalized_b64,
+        }
 
     def gallery_image_path(self, img_id: str) -> Path | None:
         path = self.img_index.get(str(img_id))
         if path is None:
             return None
-        if path.is_file():
-            return path
+        safe_path = self._safe_project_file(path)
+        if safe_path is not None:
+            return safe_path
 
         marker = "PigeonVision/"
         raw = str(path)
         if marker in raw:
             relocated = ROOT / raw.split(marker, 1)[1]
-            if relocated.is_file():
-                return relocated
+            safe_relocated = self._safe_project_file(relocated)
+            if safe_relocated is not None:
+                return safe_relocated
         return None
+
+    def gallery_image_jpeg(self, img_id: str) -> bytes | None:
+        image_path = self.gallery_image_path(img_id)
+        if image_path is None:
+            return None
+        try:
+            image_bgr = self._decode_image(image_path.read_bytes())
+        except (OSError, ValueError):
+            return None
+        return self._encode_image_bytes(
+            image_bgr,
+            ".jpg",
+            params=[int(cv2.IMWRITE_JPEG_QUALITY), 95],
+        )
 
     def _load_encoders(self) -> list[IrisEncoder]:
         if not self.fusion:
@@ -274,7 +394,9 @@ class IrisPipeline:
         encoder.eval()
         return encoder
 
-    def _load_detector(self) -> YOLO:
+    def _load_detector(self):
+        from ultralytics import YOLO
+
         checkpoint = self.detection_checkpoint
         if not checkpoint.exists():
             candidates = sorted(
@@ -348,6 +470,19 @@ class IrisPipeline:
         tensor = torch.from_numpy(normalized_rgb.transpose(2, 0, 1)).unsqueeze(0)
         return tensor.to(dtype=torch.float32)
 
+    def _ensure_normalized_shape(self, normalized_bgr: np.ndarray) -> np.ndarray:
+        height, width = self.input_shape
+        if normalized_bgr.shape[:2] == (height, width):
+            return normalized_bgr
+        return cv2.resize(normalized_bgr, (width, height), interpolation=cv2.INTER_AREA)
+
+    @staticmethod
+    def _ensure_display_normalized_shape(normalized_bgr: np.ndarray) -> np.ndarray:
+        height, width = NORMALIZED_SHAPE
+        if normalized_bgr.shape[:2] == (height, width):
+            return normalized_bgr
+        return cv2.resize(normalized_bgr, (width, height), interpolation=cv2.INTER_AREA)
+
     @staticmethod
     def _decode_image(img_bytes: bytes) -> np.ndarray:
         if not img_bytes:
@@ -357,6 +492,31 @@ class IrisPipeline:
         if image_bgr is None:
             raise ValueError("图片解码失败，请上传有效图片")
         return image_bgr
+
+    @staticmethod
+    def _encode_image_bytes(image_bgr: np.ndarray, extension: str, params: list[int] | None = None) -> bytes:
+        ok, encoded = cv2.imencode(extension, image_bgr, params or [])
+        if not ok:
+            raise ValueError(f"图片编码失败：{extension}")
+        return encoded.tobytes()
+
+    @classmethod
+    def _encode_image_b64(cls, image_bgr: np.ndarray, extension: str, params: list[int] | None = None) -> str:
+        return base64.b64encode(cls._encode_image_bytes(image_bgr, extension, params=params)).decode("ascii")
+
+    @staticmethod
+    def _safe_project_file(path: Path) -> Path | None:
+        if not path.is_absolute():
+            path = ROOT / path
+        try:
+            root = ROOT.resolve()
+            resolved = path.resolve()
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            return None
+        if not resolved.is_file():
+            return None
+        return resolved
 
     @staticmethod
     def _resolve(path: str | Path) -> Path:

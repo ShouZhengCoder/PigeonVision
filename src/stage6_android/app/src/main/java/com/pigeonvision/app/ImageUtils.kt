@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import kotlin.math.ceil
 import kotlin.math.max
@@ -41,6 +42,12 @@ fun decodeBitmapFromUri(context: Context, uri: Uri, maxDimension: Int = 2048): B
     } ?: throw IOException("无法读取图片")
   }
 }
+
+fun Bitmap.toJpegBytes(quality: Int = 90): ByteArray =
+  ByteArrayOutputStream().use { output ->
+    compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), output)
+    output.toByteArray()
+  }
 
 private fun calculateSampleSize(width: Int, height: Int, maxDimension: Int): Int {
   val largest = max(width, height)

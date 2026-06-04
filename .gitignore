@@ -7,6 +7,10 @@ outputs/iris_normalized/
 outputs/iris_extracted/
 outputs/features/*.npy
 outputs/features/*.bin
+outputs/features/**/*.npy
+outputs/features/**/*.bin
+outputs/features/**/threshold.json
+outputs/features/embeddings/
 checkpoints/
 
 # ---- 训练日志 ----
@@ -45,6 +49,7 @@ pigeon-breed-image-dataset/
 
 # ---- Android 构建产物 ----
 src/stage6_android/.gradle/
+src/stage6_android/.kotlin/
 src/stage6_android/build/
 src/stage6_android/app/build/
 src/stage6_android/local.properties

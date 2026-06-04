@@ -17,17 +17,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -96,6 +99,8 @@ fun PigeonVisionApp(
   var healthState by remember { mutableStateOf<ActionState<HealthResponse>>(ActionState.Idle) }
   var compareState by remember { mutableStateOf<ActionState<CompareResponse>>(ActionState.Idle) }
   var searchState by remember { mutableStateOf<ActionState<SearchResponse>>(ActionState.Idle) }
+  var compareProcessPreview by remember { mutableStateOf<CompareProcessPreview?>(null) }
+  var searchProcessPreview by remember { mutableStateOf<SearchProcessPreview?>(null) }
   val scope = rememberCoroutineScope()
   val searchImageLoader = remember { SearchImageLoader(apiClient) }
 
@@ -108,14 +113,17 @@ fun PigeonVisionApp(
       ImageTarget.CompareA -> {
         compareA = bitmap
         compareState = ActionState.Idle
+        compareProcessPreview = null
       }
       ImageTarget.CompareB -> {
         compareB = bitmap
         compareState = ActionState.Idle
+        compareProcessPreview = null
       }
       ImageTarget.Search -> {
         searchImage = bitmap
         searchState = ActionState.Idle
+        searchProcessPreview = null
         searchPage = 0
       }
     }
@@ -202,12 +210,22 @@ fun PigeonVisionApp(
       return
     }
     scope.launch {
+      compareProcessPreview = null
       compareState = ActionState.Loading
       compareState =
         try {
           val cropA = cropOrThrow(detector, imageA, "第一张图片")
+          compareProcessPreview = CompareProcessPreview(eyeCropA = cropA.bitmap, eyeCropB = null)
           val cropB = cropOrThrow(detector, imageB, "第二张图片")
-          ActionState.Success(apiClient.compare(serverUrl, cropA.jpegBytes, cropB.jpegBytes))
+          compareProcessPreview = CompareProcessPreview(eyeCropA = cropA.bitmap, eyeCropB = cropB.bitmap)
+          val response =
+            apiClient.compare(
+              serverUrl,
+              cropA.jpegBytes,
+              cropB.jpegBytes,
+              eyeCrop = true,
+            )
+          ActionState.Success(response)
         } catch (error: NoEyeDetectedException) {
           showToast("未检测到眼部，请靠近拍摄")
           ActionState.Error(error.message.orEmpty())
@@ -233,12 +251,16 @@ fun PigeonVisionApp(
       return
     }
     scope.launch {
+      searchProcessPreview = null
       searchState = ActionState.Loading
       searchPage = 0
       searchState =
         try {
           val crop = cropOrThrow(detector, image, "检索图片")
-          ActionState.Success(apiClient.search(serverUrl, crop.jpegBytes, topK = topK))
+          searchProcessPreview = SearchProcessPreview(eyeCrop = crop.bitmap)
+          val response =
+            apiClient.search(serverUrl, crop.jpegBytes, topK = topK, eyeCrop = true)
+          ActionState.Success(response)
         } catch (error: NoEyeDetectedException) {
           showToast("未检测到眼部，请靠近拍摄")
           ActionState.Error(error.message.orEmpty())
@@ -249,7 +271,16 @@ fun PigeonVisionApp(
   }
 
   Scaffold(
-    topBar = { TopAppBar(title = { Text("PigeonVision") }) },
+    topBar = {
+      TopAppBar(
+        title = {
+          Column {
+            Text("PigeonVision", fontWeight = FontWeight.Bold)
+            Text("鸽眼虹膜识别实验台", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        }
+      )
+    },
     modifier = modifier.fillMaxSize(),
   ) { padding ->
     Column(
@@ -278,6 +309,7 @@ fun PigeonVisionApp(
             imageA = compareA,
             imageB = compareB,
             state = compareState,
+            processPreview = compareProcessPreview,
             onPickA = { chooseFromGallery(ImageTarget.CompareA) },
             onCameraA = { takePhoto(ImageTarget.CompareA) },
             onPickB = { chooseFromGallery(ImageTarget.CompareB) },
@@ -289,6 +321,7 @@ fun PigeonVisionApp(
           SearchScreen(
             image = searchImage,
             state = searchState,
+            processPreview = searchProcessPreview,
             serverUrl = serverUrl,
             topKText = searchTopKText,
             pageIndex = searchPage,
@@ -317,40 +350,80 @@ private fun ServerPanel(
   healthState: ActionState<HealthResponse>,
   onTestConnection: () -> Unit,
 ) {
-  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      OutlinedTextField(
-        value = serverUrl,
-        onValueChange = onServerUrlChange,
-        label = { Text("服务器地址") },
-        placeholder = { Text("http://192.168.1.x:5000") },
-        singleLine = true,
-        modifier = Modifier.weight(1f),
-      )
-      Spacer(Modifier.width(8.dp))
-      Button(onClick = onTestConnection, enabled = healthState !is ActionState.Loading) {
-        if (healthState is ActionState.Loading) {
-          CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-        } else {
-          Icon(Icons.Filled.CheckCircle, contentDescription = null)
+  val statusColor =
+    when (healthState) {
+      ActionState.Idle -> MaterialTheme.colorScheme.onSurfaceVariant
+      ActionState.Loading -> MaterialTheme.colorScheme.secondary
+      is ActionState.Success -> MaterialTheme.colorScheme.primary
+      is ActionState.Error -> MaterialTheme.colorScheme.error
+    }
+  val statusText =
+    when (healthState) {
+      ActionState.Idle -> "未连接"
+      ActionState.Loading -> "连接中"
+      is ActionState.Success -> "在线"
+      is ActionState.Error -> "异常"
+    }
+
+  OutlinedCard(
+    shape = RoundedCornerShape(8.dp),
+    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+  ) {
+    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column {
+          Text("服务端连接", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+          Text("Flask / U-Net / FAISS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Spacer(Modifier.width(6.dp))
-        Text("测试")
+        Surface(shape = RoundedCornerShape(999.dp), color = statusColor.copy(alpha = 0.12f)) {
+          Text(
+            statusText,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = statusColor,
+            fontWeight = FontWeight.Bold,
+          )
+        }
+      }
+
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+          value = serverUrl,
+          onValueChange = onServerUrlChange,
+          label = { Text("服务器地址") },
+          placeholder = { Text("http://192.168.1.x:5000") },
+          singleLine = true,
+          modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Button(onClick = onTestConnection, enabled = healthState !is ActionState.Loading, modifier = Modifier.height(56.dp)) {
+          if (healthState is ActionState.Loading) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+          } else {
+            Icon(Icons.Filled.CheckCircle, contentDescription = null)
+          }
+          Spacer(Modifier.width(6.dp))
+          Text("测试")
+        }
+      }
+
+      when (healthState) {
+        ActionState.Idle -> Text("输入局域网 Flask 服务地址后测试连接", style = MaterialTheme.typography.bodySmall)
+        ActionState.Loading -> Text("正在连接服务器...", style = MaterialTheme.typography.bodySmall)
+        is ActionState.Success ->
+          Text(
+            "服务状态：${healthState.value.status}，图库：${healthState.value.gallerySize}",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+          )
+        is ActionState.Error ->
+          Text(healthState.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
       }
     }
-    when (healthState) {
-      ActionState.Idle -> Text("输入局域网 Flask 服务地址后测试连接", style = MaterialTheme.typography.bodySmall)
-      ActionState.Loading -> Text("正在连接服务器...", style = MaterialTheme.typography.bodySmall)
-      is ActionState.Success ->
-        Text(
-          "服务状态：${healthState.value.status}，图库：${healthState.value.gallerySize}",
-          style = MaterialTheme.typography.bodySmall,
-          fontWeight = FontWeight.Medium,
-        )
-      is ActionState.Error ->
-        Text(healthState.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-    }
-    HorizontalDivider()
   }
 }
 

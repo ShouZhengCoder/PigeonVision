@@ -2,6 +2,7 @@ package com.pigeonvision.app
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.math.ceil
@@ -29,7 +30,7 @@ data class CropBounds(val left: Int, val top: Int, val right: Int, val bottom: I
     get() = bottom - top
 }
 
-data class EyeCrop(val jpegBytes: ByteArray, val detection: DetectionResult)
+data class EyeCrop(val jpegBytes: ByteArray, val detection: DetectionResult, val bitmap: Bitmap)
 
 class YoloDetector(private val context: Context) {
   @Volatile private var loaded = false
@@ -73,14 +74,17 @@ class YoloDetector(private val context: Context) {
   ): EyeCrop? {
     val detection = detect(bitmap, confidenceThreshold, nmsThreshold) ?: return null
     val bounds = detection.expandedCropBounds(bitmap.width, bitmap.height) ?: return null
+    Log.i(
+      "PigeonYolo",
+      "crop confidence=${"%.3f".format(detection.confidence)} bounds=${bounds.left},${bounds.top},${bounds.right},${bounds.bottom} size=${bounds.width}x${bounds.height}",
+    )
     val crop = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width, bounds.height)
     val bytes =
       ByteArrayOutputStream().use { output ->
         crop.compress(Bitmap.CompressFormat.JPEG, jpegQuality.coerceIn(1, 100), output)
         output.toByteArray()
       }
-    crop.recycle()
-    return EyeCrop(bytes, detection)
+    return EyeCrop(bytes, detection, crop)
   }
 
   private fun FloatArray.toDetectionResult(): DetectionResult? {
