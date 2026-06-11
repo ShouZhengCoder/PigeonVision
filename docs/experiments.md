@@ -5,7 +5,7 @@
 信鸽虹膜识别系统，两个核心任务：
 
 - **Compare**：两张虹膜图 → 判断是否同血脉
-- **Search**：一张虹膜图 → 在 22K 数据库中检索 Top-K 血脉相关鸽子
+- **Search**：一张虹膜图 → 在生产库中检索 Top-K 血脉相关鸽子；离线指标使用 train gallery + val query 的评估库
 
 **完整推理管线**：
 
@@ -16,7 +16,7 @@
       → [Stage 4] IrisEncoder 特征提取 → L2 归一化向量 (256/512-dim)
         → [Stage 5] FAISS 检索 / 距离比对 → Flask API
 
-最佳模型：Concat 512d (Triplet 256d + SupCon 256d 拼接)
+最佳模型：Concat 1024d (Triplet 256d + SupCon 256d + ArcFace 512d 拼接)
 ```
 
 ---
@@ -33,7 +33,8 @@
 | 每图平均 blood_id 数 | 6.4 个（91.8% 图像有多个血脉） |
 | 图库平均每查询相关图像 | 53 张 |
 | 特征维度 | 256 / 512 |
-| 图库规模（FAISS） | 22,043 × 256 维 L2 归一化向量 |
+| 评估库（FAISS） | `fusion_1024d_eval`：train gallery，不含 val/query |
+| 生产库（FAISS） | `fusion_1024d_full`：全部 success PNG，当前应接近 25,690 × 1024 维 L2 归一化向量 |
 
 ---
 
@@ -64,13 +65,20 @@
 
 ### 4.1 Search 检索
 
-- **P@K（Precision@K）**：返回的 K 张图中，血脉相关的比例
-- **R@K（Recall@K）**：K 张图中至少有一张血脉相关，则此查询成功；成功查询占比
+- **Hit@K**：Top-K 中是否至少有一张血脉相关图；再对所有 query 求平均。历史表格里的 R@K 多数是 Hit@K 口径。
+- **avg_relevant@K**：Top-K 中平均有几张血脉相关图。
+- **Precision@K**：返回的 K 张图中血脉相关的比例，等于 `avg_relevant@K / K`。
+- **Recall@K**：Top-K 相关图数量 / gallery 中全部相关图数量，再对所有 query 求平均。
+- **nDCG@K**：使用当前二值相关性计算的排序质量，越靠前命中相关样本得分越高。
 - **mAP（mean Average Precision）**：所有查询的平均精度均值，衡量整体排序质量
 
-**用户最关心的指标**：R@K — 上传一张虹膜图，Top-K 中能找到血脉相关鸽子的概率。
+**用户最关心的指标**：Hit@K — 上传一张虹膜图，Top-K 中能找到至少一张血脉相关鸽子的概率。Precision@K / avg_relevant@K 则表示 Top-K 里平均有多少相关结果。
 
-### 4.2 Compare 比对
+### 4.2 PG_ID 聚合评估
+
+为了避免同一 `PG_ID` 多张图挤占排序，`build_db_fusion.py --mode eval` 还会把 gallery 中同一 `PG_ID` 的多张图先聚合成 centroid，再用 image-level query 计算 PG_ID 级别 Top-K 指标，输出在 `pg_id_centroid_search`。
+
+### 4.3 Compare 比对
 
 - **AUC**：区分血脉相关/不相关图像对的 ROC 曲线下面积（随机=50%）
 - **Balanced Accuracy**：平衡准确率
@@ -181,18 +189,18 @@
 | Cross-eval R@1 | 27.7% |
 | Cross-eval mAP | 20.9% |
 
-**Concat 1024d 完整评估**（22K 图库）：
+**Concat 1024d 完整评估**（`fusion_1024d_eval`，train gallery + val query）：
 
 | 指标 | Concat 512d (前最佳) | **Concat 1024d** | 变化 |
 |------|:------:|:------:|:------:|
-| Search R@1 | 25.9% | **35.5%** | **↑ 9.6pp** |
-| Search R@5 | 43.6% | **52.0%** | ↑ 8.4pp |
-| Search R@10 | 51.8% | **59.1%** | ↑ 7.3pp |
+| Search Hit@1 | 25.9% | **35.5%** | **↑ 9.6pp** |
+| Search Hit@5 | 43.6% | **52.0%** | ↑ 8.4pp |
+| Search Hit@10 | 51.8% | **59.1%** | ↑ 7.3pp |
 | Search mAP | 12.4% | **16.2%** | ↑ 31% |
 | Compare AUC | 71.0% | **73.1%** | ↑ 2.1pp |
 | Compare BalAcc | 65.0% | **66.9%** | ↑ 1.9pp |
 
-**结论**：ArcFace 的 proxy-based 全局分类特征与 Triplet/SupCon 的 pair-based 局部对比特征高度互补。Concat 1024d 在所有指标上取得大幅领先，首次实现 R@1 突破 35%、R@10 接近 60%。
+**结论**：ArcFace 的 proxy-based 全局分类特征与 Triplet/SupCon 的 pair-based 局部对比特征高度互补。Concat 1024d 在所有指标上取得大幅领先，首次实现 Hit@1 突破 35%、Hit@10 接近 60%。
 
 ---
 
@@ -202,9 +210,9 @@
 
 | 任务 | 指标 | 值 |
 |------|------|:------:|
-| **Search** | R@1 | **35.5%** |
-| | R@5 | **52.0%** |
-| | R@10 | **59.1%** |
+| **Search** | Hit@1 | **35.5%** |
+| | Hit@5 | **52.0%** |
+| | Hit@10 | **59.1%** |
 | | P@5 | 23.2% |
 | | P@10 | 18.7% |
 | | mAP | 16.2% |
@@ -213,7 +221,7 @@
 
 ### 6.2 用户视角解读
 
-- **检索**：上传一张鸽眼图，返回 10 个结果，**59% 的概率至少有一张血脉相关**；返回 10 张图，**其中约 2-3 张血脉相关**
+- **检索**：上传一张鸽眼图，返回 10 个结果，历史评估中 **59% 的概率至少有一张血脉相关**；Precision@K / avg_relevant@K 用于衡量 Top-K 内平均相关数量
 - **比对**：两张鸽眼图 → 判断是否同血脉，**正确率 67%（随机 50%）**，**AUC 73.1%**
 
 ### 6.3 模型配置
@@ -227,7 +235,9 @@ Concat 1024d 融合模型 (最佳):
   └── ArcFace Encoder: ResNet50, 512-dim
       (训练: 7K张, 486品种, ArcFace + CrossEntropy, s=30, m=0.5)
 
-FAISS: IndexFlatL2, 1024-dim, 22K vectors
+FAISS:
+  - fusion_1024d_eval: train gallery + val query，用于离线评估
+  - fusion_1024d_full: 全部 success PNG，供 Flask 生产检索使用（当前应接近 25,690 vectors）
 API: Flask, /search + /compare endpoints
 ```
 

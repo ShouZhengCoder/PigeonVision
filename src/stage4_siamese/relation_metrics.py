@@ -9,7 +9,117 @@ from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_sco
 
 
 EMPTY_METRICS = {"accuracy": 0.0, "balanced_accuracy": 0.0, "auc": 0.0, "eer": 1.0, "threshold": 0.0}
-EMPTY_SEARCH_METRICS = {"recall_at_1": 0.0, "recall_at_5": 0.0, "recall_at_10": 0.0, "mAP": 0.0}
+SEARCH_KS = (1, 5, 10)
+
+
+def _empty_search_metrics() -> dict[str, float]:
+    metrics: dict[str, float] = {"valid_queries": 0.0, "mean_relevant_total": 0.0, "mAP": 0.0}
+    for k in SEARCH_KS:
+        metrics[f"hit_at_{k}"] = 0.0
+        metrics[f"recall_at_{k}"] = 0.0
+        metrics[f"avg_relevant_at_{k}"] = 0.0
+        metrics[f"precision_at_{k}"] = 0.0
+        metrics[f"ndcg_at_{k}"] = 0.0
+    return metrics
+
+
+EMPTY_SEARCH_METRICS = _empty_search_metrics()
+
+
+def _init_search_acc() -> dict[str, object]:
+    return {
+        "valid": 0,
+        "relevant_total_sum": 0,
+        "ap_sum": 0.0,
+        "hit": {k: 0.0 for k in SEARCH_KS},
+        "recall": {k: 0.0 for k in SEARCH_KS},
+        "avg_relevant": {k: 0.0 for k in SEARCH_KS},
+        "precision": {k: 0.0 for k in SEARCH_KS},
+        "ndcg": {k: 0.0 for k in SEARCH_KS},
+    }
+
+
+def _ndcg_at(ranked_relevant: np.ndarray, relevant_total: int, k: int) -> float:
+    if relevant_total <= 0:
+        return 0.0
+    top = ranked_relevant[: min(k, len(ranked_relevant))].astype(np.float32)
+    if len(top) == 0:
+        return 0.0
+    discounts = 1.0 / np.log2(np.arange(2, len(top) + 2, dtype=np.float32))
+    dcg = float(np.sum(top * discounts))
+    ideal_len = min(int(relevant_total), int(k))
+    if ideal_len <= 0:
+        return 0.0
+    ideal_discounts = 1.0 / np.log2(np.arange(2, ideal_len + 2, dtype=np.float32))
+    idcg = float(np.sum(ideal_discounts))
+    return dcg / idcg if idcg > 0 else 0.0
+
+
+def _average_precision(ranked_relevant: np.ndarray, relevant_total: int) -> float:
+    if relevant_total <= 0:
+        return 0.0
+    hits = 0
+    precision_sum = 0.0
+    for rank, is_relevant in enumerate(ranked_relevant, start=1):
+        if is_relevant:
+            hits += 1
+            precision_sum += hits / rank
+    return precision_sum / relevant_total
+
+
+def _update_search_acc(acc: dict[str, object], ranked_relevant: np.ndarray, relevant_total: int) -> None:
+    acc["valid"] = int(acc["valid"]) + 1
+    acc["relevant_total_sum"] = int(acc["relevant_total_sum"]) + int(relevant_total)
+    acc["ap_sum"] = float(acc["ap_sum"]) + _average_precision(ranked_relevant, relevant_total)
+
+    hit = acc["hit"]
+    recall = acc["recall"]
+    avg_relevant = acc["avg_relevant"]
+    precision = acc["precision"]
+    ndcg = acc["ndcg"]
+    assert isinstance(hit, dict)
+    assert isinstance(recall, dict)
+    assert isinstance(avg_relevant, dict)
+    assert isinstance(precision, dict)
+    assert isinstance(ndcg, dict)
+
+    for k in SEARCH_KS:
+        relevant_count = int(np.sum(ranked_relevant[: min(k, len(ranked_relevant))]))
+        hit[k] += float(relevant_count > 0)
+        recall[k] += float(relevant_count / max(int(relevant_total), 1))
+        avg_relevant[k] += float(relevant_count)
+        precision[k] += float(relevant_count / k)
+        ndcg[k] += _ndcg_at(ranked_relevant, relevant_total, k)
+
+
+def _finalize_search_acc(acc: dict[str, object]) -> dict[str, float]:
+    valid = int(acc["valid"])
+    if valid <= 0:
+        return dict(EMPTY_SEARCH_METRICS)
+
+    hit = acc["hit"]
+    recall = acc["recall"]
+    avg_relevant = acc["avg_relevant"]
+    precision = acc["precision"]
+    ndcg = acc["ndcg"]
+    assert isinstance(hit, dict)
+    assert isinstance(recall, dict)
+    assert isinstance(avg_relevant, dict)
+    assert isinstance(precision, dict)
+    assert isinstance(ndcg, dict)
+
+    metrics = {
+        "valid_queries": float(valid),
+        "mean_relevant_total": float(int(acc["relevant_total_sum"]) / valid),
+        "mAP": float(float(acc["ap_sum"]) / valid),
+    }
+    for k in SEARCH_KS:
+        metrics[f"hit_at_{k}"] = float(hit[k] / valid)
+        metrics[f"recall_at_{k}"] = float(recall[k] / valid)
+        metrics[f"avg_relevant_at_{k}"] = float(avg_relevant[k] / valid)
+        metrics[f"precision_at_{k}"] = float(precision[k] / valid)
+        metrics[f"ndcg_at_{k}"] = float(ndcg[k] / valid)
+    return metrics
 
 
 def _read_pigeon_blood_names(path: str | Path) -> pd.DataFrame:
@@ -147,9 +257,7 @@ def compute_search_metrics_by_related_breeds(
     np.fill_diagonal(dist2, np.inf)
     order = np.argsort(dist2, axis=1)
 
-    recall_hits = {1: 0, 5: 0, 10: 0}
-    aps: list[float] = []
-    valid = 0
+    acc = _init_search_acc()
     for i in range(n):
         query_related = related_sets[i]
         if not query_related:
@@ -158,24 +266,10 @@ def compute_search_metrics_by_related_breeds(
         relevant_total = int(np.sum(relevant))
         if relevant_total == 0:
             continue
-        valid += 1
         ranked_relevant = relevant[order[i]]
-        for k in (1, 5, 10):
-            recall_hits[k] += int(np.any(ranked_relevant[: min(k, len(ranked_relevant))]))
-        hits = 0
-        precision_sum = 0.0
-        for rank, is_relevant in enumerate(ranked_relevant, start=1):
-            if is_relevant:
-                hits += 1
-                precision_sum += hits / rank
-        aps.append(precision_sum / relevant_total)
+        _update_search_acc(acc, ranked_relevant, relevant_total)
 
-    return {
-        "recall_at_1": recall_hits[1] / max(valid, 1),
-        "recall_at_5": recall_hits[5] / max(valid, 1),
-        "recall_at_10": recall_hits[10] / max(valid, 1),
-        "mAP": float(np.mean(aps)) if aps else 0.0,
-    }
+    return _finalize_search_acc(acc)
 
 
 def compute_cross_search_metrics_by_related_breeds(
@@ -192,9 +286,7 @@ def compute_cross_search_metrics_by_related_breeds(
     query_related_sets = _ordered_related_sets(query_img_ids, related_blood_names)
     gallery_names = _normalize_names(gallery_blood_names)
     gallery_norms = np.sum(gallery_features * gallery_features, axis=1)
-    recall_hits = {1: 0, 5: 0, 10: 0}
-    aps: list[float] = []
-    valid = 0
+    acc = _init_search_acc()
 
     for start in range(0, len(query_features), int(chunk_size)):
         end = min(start + int(chunk_size), len(query_features))
@@ -210,24 +302,10 @@ def compute_cross_search_metrics_by_related_breeds(
             relevant_total = int(np.sum(relevant))
             if relevant_total == 0:
                 continue
-            valid += 1
             ranked_relevant = relevant[ranked_idx]
-            for k in (1, 5, 10):
-                recall_hits[k] += int(np.any(ranked_relevant[: min(k, len(ranked_relevant))]))
-            hits = 0
-            precision_sum = 0.0
-            for rank, is_relevant in enumerate(ranked_relevant, start=1):
-                if is_relevant:
-                    hits += 1
-                    precision_sum += hits / rank
-            aps.append(precision_sum / relevant_total)
+            _update_search_acc(acc, ranked_relevant, relevant_total)
 
-    return {
-        "recall_at_1": recall_hits[1] / max(valid, 1),
-        "recall_at_5": recall_hits[5] / max(valid, 1),
-        "recall_at_10": recall_hits[10] / max(valid, 1),
-        "mAP": float(np.mean(aps)) if aps else 0.0,
-    }
+    return _finalize_search_acc(acc)
 
 
 def compute_compare_metrics_by_related_breeds(
@@ -436,6 +514,41 @@ def _blood_id_relevant_mask(
     return relevant
 
 
+def compute_cross_search_metrics_by_sets(
+    query_features: np.ndarray,
+    query_sets: list[frozenset[str]],
+    gallery_features: np.ndarray,
+    gallery_sets: list[frozenset[str]],
+    chunk_size: int = 256,
+) -> dict[str, float]:
+    if len(query_features) == 0 or len(gallery_features) == 0:
+        return dict(EMPTY_SEARCH_METRICS)
+    if len(query_features) != len(query_sets):
+        raise ValueError("query_features and query_sets length mismatch")
+    if len(gallery_features) != len(gallery_sets):
+        raise ValueError("gallery_features and gallery_sets length mismatch")
+
+    gallery_norms = np.sum(gallery_features * gallery_features, axis=1)
+    acc = _init_search_acc()
+    for start in range(0, len(query_features), int(chunk_size)):
+        end = min(start + int(chunk_size), len(query_features))
+        query_chunk = query_features[start:end]
+        query_norms = np.sum(query_chunk * query_chunk, axis=1, keepdims=True)
+        dist2 = query_norms + gallery_norms[None, :] - 2.0 * (query_chunk @ gallery_features.T)
+        order = np.argsort(dist2, axis=1)
+        for local_i, ranked_idx in enumerate(order):
+            query_set = query_sets[start + local_i]
+            if not query_set:
+                continue
+            relevant = _blood_id_relevant_mask(query_set, gallery_sets)
+            relevant_total = int(np.sum(relevant))
+            if relevant_total == 0:
+                continue
+            ranked_relevant = relevant[ranked_idx]
+            _update_search_acc(acc, ranked_relevant, relevant_total)
+    return _finalize_search_acc(acc)
+
+
 def compute_search_metrics_by_blood_ids(
     features: np.ndarray,
     img_ids: list[str] | np.ndarray,
@@ -451,9 +564,7 @@ def compute_search_metrics_by_blood_ids(
     np.fill_diagonal(dist2, np.inf)
     order = np.argsort(dist2, axis=1)
 
-    recall_hits = {1: 0, 5: 0, 10: 0}
-    aps: list[float] = []
-    valid = 0
+    acc = _init_search_acc()
     for i in range(n):
         query_set = ordered_sets[i]
         if not query_set:
@@ -462,24 +573,10 @@ def compute_search_metrics_by_blood_ids(
         relevant_total = int(np.sum(relevant))
         if relevant_total == 0:
             continue
-        valid += 1
         ranked_relevant = relevant[order[i]]
-        for k in (1, 5, 10):
-            recall_hits[k] += int(np.any(ranked_relevant[: min(k, len(ranked_relevant))]))
-        hits = 0
-        precision_sum = 0.0
-        for rank, is_relevant in enumerate(ranked_relevant, start=1):
-            if is_relevant:
-                hits += 1
-                precision_sum += hits / rank
-        aps.append(precision_sum / relevant_total)
+        _update_search_acc(acc, ranked_relevant, relevant_total)
 
-    return {
-        "recall_at_1": recall_hits[1] / max(valid, 1),
-        "recall_at_5": recall_hits[5] / max(valid, 1),
-        "recall_at_10": recall_hits[10] / max(valid, 1),
-        "mAP": float(np.mean(aps)) if aps else 0.0,
-    }
+    return _finalize_search_acc(acc)
 
 
 def compute_cross_search_metrics_by_blood_ids(
@@ -497,13 +594,11 @@ def compute_cross_search_metrics_by_blood_ids(
     query_sets = _ordered_blood_id_sets(query_img_ids, blood_id_sets)
     gallery_sets = _ordered_blood_id_sets(gallery_img_ids, blood_id_sets)
     gallery_norms = np.sum(gallery_features * gallery_features, axis=1)
-    recall_hits = {1: 0, 5: 0, 10: 0}
-    aps: list[float] = []
-    valid = 0
+    acc = _init_search_acc()
 
     # Pre-compute self-exclusion mapping when query == gallery
     self_exclude: dict[int, int] = {}
-    if exclude_self and query_img_ids is gallery_img_ids:
+    if exclude_self:
         q_ids = [str(x) for x in query_img_ids]
         g_ids = [str(x) for x in gallery_img_ids]
         id_to_gidx = {id_: i for i, id_ in enumerate(g_ids)}
@@ -526,28 +621,15 @@ def compute_cross_search_metrics_by_blood_ids(
             query_set = query_sets[start + local_i]
             if not query_set:
                 continue
-            relevant = _blood_id_relevant_mask(query_set, gallery_sets)
+            exclude_index = self_exclude.get(start + local_i)
+            relevant = _blood_id_relevant_mask(query_set, gallery_sets, exclude_index=exclude_index)
             relevant_total = int(np.sum(relevant))
             if relevant_total == 0:
                 continue
-            valid += 1
             ranked_relevant = relevant[ranked_idx]
-            for k in (1, 5, 10):
-                recall_hits[k] += int(np.any(ranked_relevant[: min(k, len(ranked_relevant))]))
-            hits = 0
-            precision_sum = 0.0
-            for rank, is_relevant in enumerate(ranked_relevant, start=1):
-                if is_relevant:
-                    hits += 1
-                    precision_sum += hits / rank
-            aps.append(precision_sum / relevant_total)
+            _update_search_acc(acc, ranked_relevant, relevant_total)
 
-    return {
-        "recall_at_1": recall_hits[1] / max(valid, 1),
-        "recall_at_5": recall_hits[5] / max(valid, 1),
-        "recall_at_10": recall_hits[10] / max(valid, 1),
-        "mAP": float(np.mean(aps)) if aps else 0.0,
-    }
+    return _finalize_search_acc(acc)
 
 
 def compute_cross_compare_metrics_by_blood_ids(

@@ -37,6 +37,13 @@ pip install -r requirements.txt
 
 ### 4. 运行服务
 
+Flask 默认读取生产检索库 `outputs/features/fusion_1024d_full/`。如果该目录还是旧的评估 gallery，先构建评估库和生产库：
+
+```bash
+python src/stage4_siamese/build_db_fusion.py --mode eval
+python src/stage4_siamese/build_db_fusion.py --mode full
+```
+
 ```bash
 python src/stage5_server/app.py --host 0.0.0.0 --port 5000
 ```
@@ -67,13 +74,13 @@ App 支持两种任务：
 
 | 任务 | 指标 | 值 |
 |------|------|:--:|
-| Search | R@1 | **35.5%** |
-| | R@10 | **59.1%** |
+| Search | Hit@1 | **35.5%** |
+| | Hit@10 | **59.1%** |
 | | mAP | 16.2% |
 | Compare | AUC | **73.1%** |
 | | BalAcc | 66.9% |
 
-> 图库 22K 张，多标签 blood_id 重合评估。详细实验记录见 [docs/experiments.md](docs/experiments.md)。
+> 以上为 `fusion_1024d_eval` 评估口径的历史结果：train 作为 gallery，val 作为 query，多标签 blood_id 重合评估。生产检索库为 `fusion_1024d_full`，使用 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的虹膜图，当前全量应接近 25,690 张。详细实验记录见 [docs/experiments.md](docs/experiments.md)。
 
 ## 项目结构
 
@@ -98,10 +105,33 @@ PigeonVision/
 │   ├── eye_crops/           # YOLO眼部裁剪 + crop_meta.csv
 │   ├── iris_normalized/     # 64×512 三通道虹膜归一化图 + normalize_meta.csv
 │   └── features/
-│       ├── fusion_1024d_full/  # 默认：Concat 1024d 特征库 + FAISS索引
-│       └── *.json              # 评估指标
+│       ├── fusion_1024d_eval/  # 评估库：train gallery + val query 指标
+│       ├── fusion_1024d_full/  # 生产库：Flask 默认读取的全量检索库
+│       └── *.json              # 旧版评估指标
 └── ROADMAP.md               # 技术路线总文档
 ```
+
+## 特征库构建
+
+`build_db_fusion.py` 支持两种模式：
+
+```bash
+# 评估库：只把 train 放入 gallery，val 仅作为 query，不混入 gallery
+python src/stage4_siamese/build_db_fusion.py --mode eval
+
+# 生产库：使用 outputs/iris_normalized/normalize_meta.csv 中全部 success PNG
+python src/stage4_siamese/build_db_fusion.py --mode full
+```
+
+`--mode eval` 默认输出 `outputs/features/fusion_1024d_eval/`，写入 `eval_metrics.json`、`eval_comparison.json`、`threshold.json` 和评估 gallery 的 FAISS 文件。`--mode full` 默认输出 `outputs/features/fusion_1024d_full/`，写入 Flask 直接读取的 `feature_db.npy`、`feature_db_meta.csv`、`faiss_index.bin`、`threshold.json`。
+
+检索指标口径：
+
+- `hit_at_k`：Top-K 内是否至少有 1 个相关样本，按 query 求平均；历史文档里的 R@K 多数是这个口径。
+- `avg_relevant_at_k`：Top-K 内平均相关样本个数。
+- `precision_at_k`：`avg_relevant_at_k / k`。
+- `recall_at_k`：Top-K 相关样本数 / gallery 中全部相关样本数，按 query 求平均。
+- `ndcg_at_k`：用二值相关性计算的排序质量。
 
 ## 数据托管策略
 
@@ -154,7 +184,7 @@ curl -X POST http://localhost:5000/search \
 - **特征编码**: ResNet34/50 + Triplet/SupCon/ArcFace → Concat 1024d 融合
 - **向量检索**: FAISS IndexFlatL2
 - **后端服务**: Flask
-- **检索效果**: R@1 35.5%, R@10 59.1%, Compare AUC 73.1%
+- **检索效果**: 历史 Hit@1 35.5%, Hit@10 59.1%, Compare AUC 73.1%
 
 ## 许可证
 
