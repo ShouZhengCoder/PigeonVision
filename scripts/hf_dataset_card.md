@@ -32,8 +32,8 @@ pigeon-breed-image-dataset/
 │
 ├── outputs/
 │   ├── eye_crops/           # YOLOv5 眼部检测裁剪结果 (25,700 张)
-│   ├── iris_normalized/     # U-Net 分割 + 椭圆展开归一化虹膜 (25,700 张)
-│   │                        # 尺寸: 64×512 灰度 PNG
+│   ├── iris_normalized/     # U-Net 分割 + 椭圆展开 + mask过滤归一化虹膜 (25,700 张)
+│   │                        # 尺寸: 64×512 三通道 PNG
 │   └── features/            # 孪生网络编码的特征向量 + FAISS 索引
 │       ├── feature_db.npy   # N×256 L2 归一化特征矩阵
 │       ├── faiss_index.bin  # FAISS IndexFlatL2 索引
@@ -62,7 +62,8 @@ pigeon-breed-image-dataset/
 
 ```
 原始鸽眼图 → YOLOv5 眼部检测 → 眼部裁剪 → U-Net 三分类分割
-→ 椭圆拟合 (pupil/iris) → Daugman 椭圆展开 → 64×512 虹膜纹理图
+→ 椭圆拟合 (pupil/iris) → Daugman 椭圆展开 → iris mask 过滤
+→ mask 外填 127 中性灰 → 64×512 三通道虹膜纹理图
 ```
 
 ## 使用方式

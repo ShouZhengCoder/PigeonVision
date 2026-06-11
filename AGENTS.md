@@ -27,7 +27,7 @@ Full spec: read `ROADMAP.md` before writing any code.
 | `data/unet_labelme_80/` | 80 manually labeled iris samples for U-Net v1 |
 | `outputs/img_index.csv` | **Built in Stage 1**: img_id → absolute file path (all scripts use this) |
 | `outputs/eye_crops/` | Eye region crops from YOLO inference |
-| `outputs/iris_normalized/` | 64×512 normalized iris images |
+| `outputs/iris_normalized/` | 64×512 3-channel mask-gated normalized iris images |
 | `outputs/features/` | Feature vectors + FAISS index |
 | `checkpoints/detection/` | YOLOv5 weights |
 | `checkpoints/segmentation/` | U-Net weights |
@@ -54,7 +54,7 @@ def load_img_index():
 - `relations.csv` has **no header row** — always read with `header=None, names=['blood_id','img_id']`; do NOT use `blood.csv` (deprecated)
 - Annotation JSONs contain labels `"eye"`, `"mouse"`, `"900"` → **keep only `"eye"`**
 - `pigeon.csv` has 11 columns: `ID, PID, CID, SID, NAME, COLOR, EYE, PG_ID, SEX, BLOOD, IMG`; field `weidth` in annotation JSONs is a typo for `width` — use as-is
-- MobileNetV2 expects 3-channel RGB input; grayscale iris images need `.convert("RGB")` before resize
+- Stage 4 expects 3-channel RGB input; `outputs/iris_normalized/*.png` should be 64×512 3-channel normalized iris images
 - Multi-label bloodlines: each image averages 6.4 blood_ids; evaluation must use blood_id overlap (not blood_name match) for accuracy
 - Best model: Concat 1024d fusion (Triplet 256-dim + SupCon 256-dim + ArcFace 512-dim concatenated)
 
@@ -73,7 +73,7 @@ Update this section as stages complete:
 ## Critical Rules
 
 1. Stage 3.5 (rebuild_pairs) MUST run before Stage 4 training
-2. Stage 3 training/inference MUST use the same `256x256`, 1-channel UNet setting with `GroupNorm(num_groups=8)` when `base_c=32`
+2. Stage 3 training/inference MUST use the same `256x256`, 1-channel UNet setting with `GroupNorm(num_groups=8)` when `base_c=32`; normalized output MUST use ellipse remap plus iris-mask filtering, filling mask-out pixels with neutral value 127
 3. build_db.py MUST cross-reference normalize_meta.csv (status=success) before extracting features
 4. convert_annotations.py MUST skip images absent from img_index.csv and report count
 5. All batch scripts MUST support --resume to skip already-processed items
@@ -106,7 +106,7 @@ Update this section as stages complete:
 **应该进入 git 的文件**：
 - 所有 `src/` 源代码
 - `configs/` 配置文件
-- CSV 元数据（crop_meta.csv, normalize_meta.csv, feature_db_meta.csv, pairs_*.csv）
+- 小型 CSV 元数据（如 pairs_*.csv、feature_db_meta.csv；重跑前不要把旧 normalize_meta.csv 当作新结果提交）
 - `data/yolo_dataset/data.yaml`
 - `ROADMAP.md`, `AGENTS.md`, `AGENT_PROMPTS.md`
 - `requirements.txt`

@@ -162,24 +162,27 @@ img_id 为文件名去掉后缀，path 为绝对路径。
 请先完整阅读 ROADMAP.md，然后实现以下内容。前提：Stage 2 已完成，outputs/eye_crops/ 下有图片。
 
 【脚本一】src/stage3_preprocess/iris_localize.py
-实现函数 localize_iris(img_bgr) -> (cx, cy, r_inner, r_outer) 或 None（定位失败返回 None）。
-算法：灰度化 → 高斯模糊(5×5) → 水平和垂直方向一维投影取最小值，确定瞳孔粗略中心 (cx,cy)
-→ 以 (cx,cy) 为中心取 ROI → Canny(低阈值50, 高阈值150) → cv2.HoughCircles 检测内外圆。
-内圆半径范围：图像宽度的 10%~25%；外圆半径范围：30%~50%。
-HoughCircles 参数：method=HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=30。
+实现 U-Net 推理封装 localize_iris(img_bgr)，返回 PredictionResult：
+- 成功时包含 pupil / iris 椭圆、原始分割 mask、mask_confidence、输入尺寸等信息。
+- 失败时包含失败原因，不能保存归一化图。
 
-实现函数 normalize_iris(img_bgr, cx, cy, r_inner, r_outer, shape=(64,512)) -> 64×512 灰度 numpy 数组。
-算法（Daugman 极坐标展开）：角度方向 512 步（0 到 2π），径向 64 步（从内圆到外圆），
-每个采样点用双线性插值取像素值。
+算法：眼部裁剪图 → resize 到 256×256 → 灰度 1 通道输入 U-Net 三分类分割
+（0=background, 1=iris, 2=pupil）→ 分别取 iris/pupil 最大连通域 → cv2.fitEllipse 拟合内外椭圆。
 
-实现函数 visualize_localization(img_bgr, cx, cy, r_inner, r_outer) -> 标注图（画出两个圆）。
+实现 normalize_iris / daugman_normalize_color：
+- 用 pupil / iris 椭圆计算 Daugman remap 坐标，角向 512 步、径向 64 步。
+- 用同一组 remap 坐标展开 iris mask。
+- mask 外像素填 127 中性灰，避免眼睑、背景或椭圆外缘内容进入有效虹膜纹理。
+- 输出 64×512 三通道 PNG，供 Stage 4 按 RGB 读取。
+
+实现 visualize_localization(img_bgr, prediction) -> 标注图：叠加分割 mask，并画出 pupil / iris 椭圆。
 
 【脚本二】src/stage3_preprocess/batch_normalize.py
 读取 outputs/eye_crops/crop_meta.csv，处理所有 confidence > 0 的图片。
 对每张图调用 localize_iris + normalize_iris。
-成功：保存 64×512 灰度 PNG 到 outputs/iris_normalized/{img_id}.png。
+成功：保存 64×512 三通道 PNG 到 outputs/iris_normalized/{img_id}.png。
 失败：记录 status=failed，不保存图片。
-写入 outputs/iris_normalized/normalize_meta.csv（列：img_id, status, cx, cy, r_inner, r_outer）。
+写入 outputs/iris_normalized/normalize_meta.csv（列：img_id, status, cx, cy, r_inner, r_outer, ellipse, mask_confidence）。
 支持 --resume，跳过 normalize_meta.csv 中已有记录的图片。
 每处理 1000 张打印一次当前成功率。
 

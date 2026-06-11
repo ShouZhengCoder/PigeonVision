@@ -47,6 +47,7 @@ SYNC_FILES = [
     "outputs/features/fusion_1024d_full/feature_db_meta.csv",
     "outputs/features/fusion_1024d_full/eval_metrics.json",
     "outputs/features/fusion_1024d_full/eval_comparison.json",
+    "outputs/features/fusion_1024d_full/threshold.json",
     # Checkpoints
     "checkpoints/detection/exp/weights/best.pt",
     "checkpoints/segmentation/best.pt",

@@ -180,10 +180,12 @@ def normalize_iris(
     iris: EllipseSpec | None = None,
     shape: tuple[int, int] = NORMALIZED_SHAPE,
 ) -> np.ndarray:
+    iris_mask: np.ndarray | None = None
     if isinstance(prediction_or_pupil, IrisSegmentationSuccess):
         pupil = prediction_or_pupil.pupil
         iris = prediction_or_pupil.iris
         input_size = prediction_or_pupil.input_size
+        iris_mask = (prediction_or_pupil.mask == 1).astype(np.uint8)
     elif isinstance(prediction_or_pupil, IrisSegmentationFailure):
         raise ValueError(prediction_or_pupil.reason)
     else:
@@ -193,7 +195,7 @@ def normalize_iris(
         input_size = IMAGE_SIZE
 
     image_gray = resize_gray_image(img_bgr, input_size)
-    return normalize_iris_from_ellipses(image_gray, pupil, iris, shape=shape)
+    return normalize_iris_from_ellipses(image_gray, pupil, iris, shape=shape, iris_mask=iris_mask)
 
 
 def daugman_normalize_color(
@@ -202,10 +204,12 @@ def daugman_normalize_color(
     iris: EllipseSpec | None = None,
     shape: tuple[int, int] = NORMALIZED_SHAPE,
 ) -> np.ndarray:
+    iris_mask: np.ndarray | None = None
     if isinstance(prediction_or_pupil, IrisSegmentationSuccess):
         pupil = prediction_or_pupil.pupil
         iris = prediction_or_pupil.iris
         input_size = prediction_or_pupil.input_size
+        iris_mask = (prediction_or_pupil.mask == 1).astype(np.uint8)
     elif isinstance(prediction_or_pupil, IrisSegmentationFailure):
         raise ValueError(prediction_or_pupil.reason)
     else:
@@ -219,7 +223,7 @@ def daugman_normalize_color(
     else:
         image_bgr = img_bgr
     image_bgr = cv2.resize(image_bgr, (int(input_size), int(input_size)), interpolation=cv2.INTER_AREA)
-    return normalize_iris_color_from_ellipses(image_bgr, pupil, iris, shape=shape)
+    return normalize_iris_color_from_ellipses(image_bgr, pupil, iris, shape=shape, iris_mask=iris_mask)
 
 
 def extract_iris_region(
@@ -227,10 +231,12 @@ def extract_iris_region(
     prediction_or_iris: PredictionResult | EllipseSpec,
     input_size: int = IMAGE_SIZE,
 ) -> np.ndarray:
+    mask_small: np.ndarray | None = None
     if isinstance(prediction_or_iris, IrisSegmentationSuccess):
         prediction = prediction_or_iris
         iris = prediction.iris
         input_size = prediction.input_size
+        mask_small = ((prediction.mask == 1).astype(np.uint8)) * 255
     elif isinstance(prediction_or_iris, IrisSegmentationFailure):
         raise ValueError(prediction_or_iris.reason)
     else:
@@ -241,8 +247,9 @@ def extract_iris_region(
     else:
         image_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    mask_small = np.zeros((int(input_size), int(input_size)), dtype=np.uint8)
-    cv2.ellipse(mask_small, ellipse_to_cv2(iris), 255, thickness=-1)
+    if mask_small is None:
+        mask_small = np.zeros((int(input_size), int(input_size)), dtype=np.uint8)
+        cv2.ellipse(mask_small, ellipse_to_cv2(iris), 255, thickness=-1)
     mask = cv2.resize(
         mask_small,
         (int(image_gray.shape[1]), int(image_gray.shape[0])),

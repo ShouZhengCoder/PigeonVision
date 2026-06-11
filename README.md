@@ -82,7 +82,7 @@ PigeonVision/
 ├── src/
 │   ├── stage1_data/         # 数据整理：图片索引、YOLO标注、样本对、多标签meta
 │   ├── stage2_detection/    # YOLOv5 眼部检测训练与推理
-│   ├── stage3_preprocess/   # U-Net 虹膜分割 + 椭圆Daugman归一化
+│   ├── stage3_preprocess/   # U-Net 虹膜分割 + Daugman 椭圆展开 + iris mask过滤
 │   ├── stage4_siamese/      # IrisEncoder 训练 + FAISS 特征库 + 多模型融合
 │   ├── stage5_server/       # Flask 后端服务 (默认 Concat 1024d 融合模型)
 │   └── stage6_android/      # Android 客户端：NCNN YOLO 裁眼 + HTTP 调用
@@ -96,7 +96,7 @@ PigeonVision/
 │   └── pairs_train.csv / pairs_val.csv             # 样本对
 ├── outputs/                 # 中间产物（图片/特征在 HF）
 │   ├── eye_crops/           # YOLO眼部裁剪 + crop_meta.csv
-│   ├── iris_normalized/     # 64×512 虹膜归一化图 + normalize_meta.csv
+│   ├── iris_normalized/     # 64×512 三通道虹膜归一化图 + normalize_meta.csv
 │   └── features/
 │       ├── fusion_1024d_full/  # 默认：Concat 1024d 特征库 + FAISS索引
 │       └── *.json              # 评估指标
@@ -113,6 +113,8 @@ PigeonVision/
 | 虹膜归一化图 | **Hugging Face** | `outputs/iris_normalized/*.png` |
 | 模型权重 | **Hugging Face** | `checkpoints/` 全部内容 |
 | 特征向量 + FAISS | **Hugging Face** | `outputs/features/*.npy`, `*.bin` |
+
+Git 只同步源码、配置、文档和小型元数据 CSV；原始图片、眼部裁剪图、归一化 PNG、模型权重和 FAISS 二进制均通过 Hugging Face 或服务器本地重跑生成。归一化逻辑变更后，不要把旧 `outputs/iris_normalized/normalize_meta.csv` 当作新结果提交。
 
 ## API 接口
 
@@ -138,7 +140,7 @@ curl -X POST http://localhost:5000/search \
 
 返回: `{"results": [{"rank": 1, "img_id": "571835", "pg_id": "2016-26-0571835", "blood_name": "桑杰士", "distance": 0.21, "image_url": "/image/571835"}, ...]}`
 
-`top_k` 默认 20，最大 100。`eye_crop=1` 表示上传内容已经是 Android 端裁好的眼部图，服务端会跳过 YOLO 检测，直接进入 U-Net 分割和特征检索。
+`top_k` 默认 20，最大 100。`eye_crop=1` 表示上传内容已经是 Android 端裁好的眼部图，服务端会跳过 YOLO 检测，直接进入 U-Net 分割、mask 过滤归一化和特征检索。
 
 ### GET /image/<img_id>
 
@@ -148,7 +150,7 @@ curl -X POST http://localhost:5000/search \
 
 - **目标检测**: YOLOv5s (ultralytics)
 - **虹膜分割**: U-Net (PyTorch, GroupNorm)
-- **椭圆展开**: Daugman 极坐标重映射
+- **虹膜归一化**: Daugman 椭圆展开 + iris mask 过滤非虹膜采样点
 - **特征编码**: ResNet34/50 + Triplet/SupCon/ArcFace → Concat 1024d 融合
 - **向量检索**: FAISS IndexFlatL2
 - **后端服务**: Flask

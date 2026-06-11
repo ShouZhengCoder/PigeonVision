@@ -26,7 +26,7 @@
 ```
 原始鸽眼图 (31,896 张)
   └─[Stage 2: YOLOv5]─→ 眼部 bbox 裁剪 (25,766 张)
-       └─[Stage 3: U-Net分割 + 椭圆Daugman展开]─→ 64×512 虹膜纹理图 (25,690 张)
+       └─[Stage 3: U-Net分割 + Daugman 椭圆展开 + iris mask过滤]─→ 64×512 三通道虹膜纹理图 (25,690 张)
             └─[Stage 4: IrisEncoder]─→ 256/512-dim L2归一化特征向量
                  ├─[Stage 5: /compare]─→ 欧氏距离 + 阈值判断 (AUC 73.1%)
                  └─[Stage 5: /search]─→ FAISS IndexFlatL2 Top-K (R@1 35.5%, R@10 59.1%)
@@ -67,7 +67,7 @@ PigeonVision/
 ├── src/
 │   ├── stage1_data/                  ← 数据整理脚本 (含多标签 meta 构建、rebuild_pairs)
 │   ├── stage2_detection/             ← YOLOv5 眼部检测
-│   ├── stage3_preprocess/            ← U-Net 虹膜分割与椭圆Daugman归一化
+│   ├── stage3_preprocess/            ← U-Net 虹膜分割、Daugman 椭圆展开与 iris mask 过滤
 │   ├── stage4_siamese/               ← IrisEncoder 训练 (Triplet/SupCon/ArcFace/Proxy-Anchor)
 │   ├── stage5_server/                ← Flask 后端服务
 │   └── stage6_android/               ← Android 客户端：NCNN YOLO 裁眼 + Flask HTTP 调用
@@ -85,7 +85,7 @@ PigeonVision/
 ├── outputs/
 │   ├── img_index.csv                 ← 图片ID到文件路径的索引（Stage 1 生成）
 │   ├── eye_crops/                    ← YOLO 裁剪的眼部图像
-│   ├── iris_normalized/              ← U-Net + 椭圆展开后的虹膜图像（64×512）
+│   ├── iris_normalized/              ← U-Net + 椭圆展开 + mask 过滤后的虹膜图像（64×512）
 │   └── features/
 │       ├── feature_db.npy            ← 特征向量矩阵 (22043×256 或 22043×512)
 │       ├── feature_db_meta.csv       ← img_id, pg_id, blood, blood_name
@@ -281,9 +281,9 @@ yolo train data=data/yolo_dataset/data.yaml model=yolov5s.pt epochs=100 batch=16
 
 ---
 
-## 阶段三：虹膜图像预处理（U-Net + 椭圆展开）
+## 阶段三：虹膜图像预处理（U-Net + 椭圆展开 + iris mask 过滤）
 
-**目标**：将眼部裁剪图转化为 64×512 虹膜纹理图。
+**目标**：将眼部裁剪图转化为 64×512 三通道虹膜纹理图。
 
 ### 算法流程
 
@@ -294,7 +294,8 @@ eye_crop.jpg
   → 取 pupil / iris 最大连通域
   → cv2.fitEllipse 拟合内外椭圆
   → 椭圆版 Daugman 展开：角向 512 步，径向 64 步，双线性插值
-  → 输出 64×512 灰度 PNG
+  → 用同一组 remap 坐标展开 iris mask，mask 外填 127 中性灰
+  → 输出 64×512 三通道 PNG
 ```
 
 ### 输出文件
@@ -308,7 +309,7 @@ eye_crop.jpg
 | `src/stage3_preprocess/unet_common.py` | U-Net 公共模块与数据处理 |
 | `src/stage3_preprocess/visualize_samples.py` | 训练/推理结果可视化 |
 | `checkpoints/segmentation/best.pt` | 最优分割权重 |
-| `outputs/iris_normalized/<img_id>.png` | 64×512 虹膜图 |
+| `outputs/iris_normalized/<img_id>.png` | 64×512 三通道虹膜图 |
 | `outputs/iris_normalized/normalize_meta.csv` | img_id, status, cx, cy, r_inner, r_outer, ellipse, mask_confidence |
 
 ### 训练约定
@@ -322,7 +323,7 @@ eye_crop.jpg
 - 仅对 train 做同步增强：水平翻转、垂直翻转、旋转 ±30°、亮度/对比度 jitter
 - 损失函数采用 `CrossEntropy + Dice`
 
-### 椭圆拟合与展开
+### 椭圆拟合、展开与 mask 过滤
 
 - 对 `pupil` 和 `iris` 的最大连通域分别执行 `cv2.fitEllipse`
 - 若椭圆拟合失败或连通域过小，则该样本记为 `failed`
@@ -335,7 +336,7 @@ eye_crop.jpg
 r(θ) = ab / sqrt((b·cosθ)^2 + (a·sinθ)^2)
 ```
 
-其中 `pupil` 和 `iris` 椭圆各算一次，得到 `r_pupil(θ)` 与 `r_iris(θ)`，再在 `[r_pupil(θ), r_iris(θ)]` 之间做 64 步径向插值，最终 remap 成 64×512 灰度图。
+其中 `pupil` 和 `iris` 椭圆各算一次，得到 `r_pupil(θ)` 与 `r_iris(θ)`，再在 `[r_pupil(θ), r_iris(θ)]` 之间做 64 步径向插值，最终 remap 成 64×512 三通道图。图像和 `iris mask` 使用同一组 remap 坐标展开，mask 外像素填充为 127，避免眼睑、背景或椭圆外缘内容进入有效虹膜纹理。
 
 ### 验收标准
 - 训练集和验证集的输入尺寸、通道数、归一化方式完全一致
@@ -374,7 +375,7 @@ r(θ) = ab / sqrt((b·cosθ)^2 + (a·sinθ)^2)
 class IrisEncoder(nn.Module):
     # ResNet34/50 backbone（pretrained ImageNet，去分类头）
     # AdaptiveAvgPool2d(1) → flatten → Linear(in_features, feat_dim) → BatchNorm1d → L2 normalize
-    # 输入：64×512 RGB（3通道，灰度图复制通道）
+    # 输入：64×512 RGB（三通道归一化虹膜 PNG）
     # 输出：256-dim 单位向量（默认）/ 512-dim
 ```
 
@@ -516,7 +517,7 @@ def process_image(img_bytes):
         iris_img = img.resize((512, 64))
 
     # 情况二：眼部特写（接近方形）
-    # 直接走 U-Net 分割 + 椭圆 Daugman 归一化
+    # 直接走 U-Net 分割 + Daugman 椭圆展开 + iris mask 过滤
     elif 0.5 < w / h < 2.0:
         iris_arr = iris_segment_and_normalize(np.array(img))
         if iris_arr is None:
@@ -540,7 +541,7 @@ def process_image(img_bytes):
 启动时加载三个模型：
 - YOLOv5（眼部检测，`checkpoints/detection/exp/weights/best.pt`）
 - U-Net（虹膜分割，`checkpoints/segmentation/best.pt`）
-- IrisEncoder（特征提取，`checkpoints/siamese/best.pt` 或 Concat 512d）
+- IrisEncoder（特征提取，`checkpoints/siamese/best.pt` 或 Concat 1024d 融合）
 - FAISS Index（检索，`outputs/features/faiss_index.bin`）
 
 ### 验收标准
@@ -561,7 +562,7 @@ Android:
   原始图片 -> NCNN YOLOv5s 检测眼部 -> JPEG 眼部裁剪图
 
 Flask:
-  eye_crop=1 -> U-Net 虹膜分割 -> 椭圆 Daugman 展开 -> IrisEncoder -> FAISS / distance
+  eye_crop=1 -> U-Net 虹膜分割 -> Daugman 椭圆展开 -> iris mask 过滤 -> IrisEncoder -> FAISS / distance
 ```
 
 Android 端不做 U-Net 分割、IrisEncoder 特征提取或 FAISS 检索。
@@ -627,7 +628,7 @@ gunicorn
 2. **blood.csv 已弃用**：不要在新脚本中引用 blood.csv，其数据已全部包含在 relations.csv 中。
 3. **标注噪声**：只保留 `label == "eye"`，过滤 "mouse" 和 "900"。
 4. **图片查找**：所有脚本通过 `outputs/img_index.csv` 查找图片路径，禁止硬编码子目录。
-5. **IrisEncoder 输入**：Stage 4 输入为 64×512 RGB（3通道），灰度图需复制通道；不同 backbone 的输入尺寸需一致。
+5. **IrisEncoder 输入**：Stage 4 输入为 64×512 RGB（三通道归一化 PNG）；不同 backbone 的输入尺寸需一致。
 6. **FAISS 向量**：存入前确保已 L2 归一化（此时 L2 距离 ≡ 余弦距离）。
 7. **多标签评估**：使用 blood_id 重合评估（非 blood_name 匹配），每张图平均 6.4 个 blood_id。
 8. **阶段依赖**：Stage 3 依赖 Stage 2 输出和 `data/unet_labelme_80/` 标注集；Stage 3.5 依赖 Stage 3 输出；Stage 4 依赖 Stage 3.5 输出。Stage 1 最优先执行。

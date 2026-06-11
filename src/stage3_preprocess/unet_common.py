@@ -21,6 +21,7 @@ GROUP_NORM_GROUPS = 8
 DEFAULT_MASK_CONFIDENCE = 0.7
 MIN_COMPONENT_AREA = 50
 MIN_CONTOUR_POINTS = 5
+DEFAULT_INVALID_IRIS_VALUE = 127
 
 
 def _resolve_num_groups(num_channels: int, requested_groups: int) -> int:
@@ -322,6 +323,8 @@ def normalize_iris_from_ellipses(
     iris: EllipseSpec,
     shape: tuple[int, int] = NORMALIZED_SHAPE,
     center: tuple[float, float] | None = None,
+    iris_mask: np.ndarray | None = None,
+    fill_value: int = DEFAULT_INVALID_IRIS_VALUE,
 ) -> np.ndarray:
     if image_gray.ndim == 3:
         image_gray = _to_gray(image_gray)
@@ -336,6 +339,9 @@ def normalize_iris_from_ellipses(
         interpolation=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_REFLECT_101,
     )
+    if iris_mask is not None:
+        normalized_mask = normalize_mask_from_ellipses(iris_mask, pupil, iris, shape=shape, center=center)
+        normalized = apply_normalized_mask(normalized, normalized_mask, fill_value=fill_value)
     return normalized
 
 
@@ -372,6 +378,8 @@ def normalize_iris_color_from_ellipses(
     iris: EllipseSpec,
     shape: tuple[int, int] = NORMALIZED_SHAPE,
     center: tuple[float, float] | None = None,
+    iris_mask: np.ndarray | None = None,
+    fill_value: int | tuple[int, int, int] = DEFAULT_INVALID_IRIS_VALUE,
 ) -> np.ndarray:
     if image_bgr.ndim == 2:
         image_bgr = cv2.cvtColor(image_bgr, cv2.COLOR_GRAY2BGR)
@@ -386,7 +394,50 @@ def normalize_iris_color_from_ellipses(
         interpolation=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_REFLECT_101,
     )
+    if iris_mask is not None:
+        normalized_mask = normalize_mask_from_ellipses(iris_mask, pupil, iris, shape=shape, center=center)
+        normalized = apply_normalized_mask(normalized, normalized_mask, fill_value=fill_value)
     return normalized
+
+
+def normalize_mask_from_ellipses(
+    mask: np.ndarray,
+    pupil: EllipseSpec,
+    iris: EllipseSpec,
+    shape: tuple[int, int] = NORMALIZED_SHAPE,
+    center: tuple[float, float] | None = None,
+) -> np.ndarray:
+    if mask.ndim == 3:
+        mask = _to_gray(mask)
+    mask = (mask > 0).astype(np.uint8) * 255
+
+    map_x, map_y = iris_remap_maps(pupil, iris, shape=shape, center=center)
+    normalized_mask = cv2.remap(
+        mask,
+        map_x,
+        map_y,
+        interpolation=cv2.INTER_NEAREST,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    return (normalized_mask > 0).astype(np.uint8)
+
+
+def apply_normalized_mask(
+    normalized: np.ndarray,
+    normalized_mask: np.ndarray,
+    fill_value: int | tuple[int, int, int] = DEFAULT_INVALID_IRIS_VALUE,
+) -> np.ndarray:
+    if normalized_mask.shape != normalized.shape[:2]:
+        raise ValueError("normalized mask shape mismatch")
+
+    result = normalized.copy()
+    invalid = normalized_mask == 0
+    if result.ndim == 2:
+        result[invalid] = int(fill_value) if not isinstance(fill_value, tuple) else int(fill_value[0])
+    else:
+        result[invalid] = fill_value
+    return result
 
 
 def compute_mask_confidence(probabilities: np.ndarray, predicted_mask: np.ndarray) -> float:

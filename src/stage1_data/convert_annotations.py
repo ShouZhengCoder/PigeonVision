@@ -91,6 +91,7 @@ def main() -> int:
     samples: list[dict[str, object]] = []
     skipped_missing = 0
     skipped_invalid_boxes = 0
+    skipped_no_eye = 0
 
     for ann_path in tqdm(ann_paths, desc="read annotations"):
         img_id = ann_path.stem
@@ -111,6 +112,9 @@ def main() -> int:
                 skipped_invalid_boxes += 1
                 continue
             boxes.append(yolo)
+        if not boxes:
+            skipped_no_eye += 1
+            continue
         samples.append({"img_id": img_id, "img_path": img_path, "boxes": boxes})
 
     img_ids = [sample["img_id"] for sample in samples]
@@ -164,6 +168,7 @@ def main() -> int:
 
     print(f"processed images: {len(samples)}")
     print(f"skipped missing images: {skipped_missing}")
+    print(f"skipped no-eye annotations: {skipped_no_eye}")
     print(f"invalid eye boxes skipped: {skipped_invalid_boxes}")
     print(f"train images: {train_count}")
     print(f"val images: {val_count}")

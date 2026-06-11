@@ -4,7 +4,6 @@ import argparse
 import json
 from pathlib import Path
 
-import faiss
 import numpy as np
 import pandas as pd
 import torch
@@ -76,6 +75,27 @@ def load_pg_id_map(pigeon_csv: Path) -> dict[str, str]:
     return dict(zip(pigeon_df["ID"], pigeon_df["PG_ID"]))
 
 
+def filter_available_rows(rows: pd.DataFrame, normalize_meta: Path, img_dir: Path, name: str) -> pd.DataFrame:
+    if not normalize_meta.exists():
+        raise FileNotFoundError(f"normalize_meta not found: {normalize_meta}")
+    normalize_df = pd.read_csv(normalize_meta, dtype={"img_id": str, "status": str})
+    required = {"img_id", "status"}
+    missing = required - set(normalize_df.columns)
+    if missing:
+        raise ValueError(f"{normalize_meta} missing columns: {sorted(missing)}")
+    success_ids = set(normalize_df[normalize_df["status"] == "success"]["img_id"].astype(str))
+
+    before = len(rows)
+    out = rows[rows["img_id"].astype(str).isin(success_ids)].copy()
+    after_status = len(out)
+    out = out[out["img_id"].astype(str).map(lambda img_id: (img_dir / f"{img_id}.png").exists())].copy()
+    print(
+        f"{name}: kept {len(out)}/{before} rows "
+        f"(status_success={after_status}, png_exists={len(out)})"
+    )
+    return out.reset_index(drop=True)
+
+
 def load_encoder(checkpoint_path: Path, feat_dim: int, backbone: str, device: torch.device) -> tuple[IrisEncoder, int]:
     encoder = IrisEncoder(feat_dim=feat_dim, backbone=backbone, pretrained=False, in_channels=3).to(device)
     state = torch.load(checkpoint_path, map_location=device)
@@ -130,6 +150,7 @@ def main() -> int:
         raise FileNotFoundError(f"checkpoint not found: {checkpoint_path}")
 
     img_dir = resolve_root_path(config["iris_dir"])
+    normalize_meta = resolve_root_path(config.get("normalize_meta", img_dir / "normalize_meta.csv"))
     train_meta = resolve_root_path(args.train_meta or config.get("train_meta", ROOT / "data" / "train_meta.csv"))
     val_meta = resolve_root_path(args.val_meta or config.get("val_meta", ROOT / "data" / "val_meta.csv"))
     output_dir = ensure_dir(resolve_root_path(args.output_dir))
@@ -140,8 +161,8 @@ def main() -> int:
     related_blood_names = load_related_blood_names(relations_path, pigeon_csv)
     blood_id_sets = load_blood_id_sets(relations_path)
 
-    train_rows = load_triplet_meta(train_meta)
-    val_rows = load_triplet_meta(val_meta)
+    train_rows = filter_available_rows(load_triplet_meta(train_meta), normalize_meta, img_dir, "train_meta")
+    val_rows = filter_available_rows(load_triplet_meta(val_meta), normalize_meta, img_dir, "val_meta")
     val_img_ids = set(val_rows["img_id"].astype(str))
     gallery_rows = train_rows[~train_rows["img_id"].astype(str).isin(val_img_ids)].drop_duplicates(subset=["img_id"]).reset_index(drop=True)
     query_rows = val_rows.drop_duplicates(subset=["img_id"]).reset_index(drop=True)
@@ -181,6 +202,8 @@ def main() -> int:
     feature_meta["blood"] = feature_meta["blood_name"]
     feature_meta = feature_meta[["img_id", "pg_id", "blood", "blood_id", "blood_name"]]
     feature_meta.to_csv(meta_path, index=False)
+    import faiss
+
     index = faiss.IndexFlatL2(int(config.get("feat_dim", 256)))
     index.add(gallery_features.astype("float32"))
     faiss.write_index(index, str(index_path))
