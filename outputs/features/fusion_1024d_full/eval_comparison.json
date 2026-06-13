@@ -1,31 +1,32 @@
 {
-  "mode": "server_optimized_summary",
-  "metric_source": "server Relation-SupCon full-library evaluation; see docs/performance_improvement_journey.md",
-  "historical_baseline_triplet_supcon_arcface": {
+  "single_label": {
     "search": {
-      "hit_at_1": 0.355,
-      "hit_at_5": 0.52,
-      "hit_at_10": 0.591,
-      "mAP": 0.162
+      "recall_at_1": 0.511876,
+      "recall_at_5": 0.656374,
+      "recall_at_10": 0.733967,
+      "mAP": 0.216435
     },
     "compare": {
-      "balanced_accuracy": 0.669,
-      "auc": 0.731
+      "accuracy": 0.610055,
+      "balanced_accuracy": 0.610055,
+      "auc": 0.642262,
+      "eer": 0.409145,
+      "threshold": 2.316508
     }
   },
-  "current_relation_supcon_full": {
-    "fusion": "triplet_256d + relation_supcon_256d + arcface_512d",
-    "gallery_size": 25690,
+  "multi_label": {
     "search": {
-      "hit_at_1": 0.643,
-      "hit_at_5": 0.808,
-      "hit_at_10": 0.857,
-      "mAP": 0.504
+      "recall_at_1": 0.314727,
+      "recall_at_5": 0.489707,
+      "recall_at_10": 0.562945,
+      "mAP": 0.209126
     },
     "compare": {
-      "balanced_accuracy": 0.932,
-      "auc": 0.98,
-      "threshold": 1.3097071694392783
+      "accuracy": 0.681087,
+      "balanced_accuracy": 0.681087,
+      "auc": 0.737686,
+      "eer": 0.335522,
+      "threshold": 2.277788
     }
   }
 }

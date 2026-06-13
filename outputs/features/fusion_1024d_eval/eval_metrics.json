@@ -1,0 +1,77 @@
+{
+  "mode": "eval",
+  "gallery_role": "train",
+  "query_role": "val",
+  "fusion": "triplet_256d + relation_supcon_256d + arcface_512d",
+  "encoders": [
+    {
+      "name": "triplet",
+      "checkpoint": "/home/u2023312335/project/learn/PigeonVision/checkpoints/siamese/best.pt",
+      "feat_dim": 256,
+      "backbone": "resnet34"
+    },
+    {
+      "name": "relation_supcon",
+      "checkpoint": "/home/u2023312335/project/learn/PigeonVision/checkpoints/siamese/relation_supcon_split/best.pt",
+      "feat_dim": 256,
+      "backbone": "resnet34"
+    },
+    {
+      "name": "arcface",
+      "checkpoint": "/home/u2023312335/project/learn/PigeonVision/checkpoints/siamese/arcface_v2/best.pt",
+      "feat_dim": 512,
+      "backbone": "resnet50"
+    }
+  ],
+  "total_dim": 1024,
+  "gallery_size": 7196,
+  "query_size": 2526,
+  "pg_id_centroid_gallery_size": 6886,
+  "search": {
+    "valid_queries": 2526.0,
+    "mean_relevant_total": 34.192399,
+    "mAP": 0.381393,
+    "hit_at_1": 0.520982,
+    "recall_at_1": 0.094444,
+    "avg_relevant_at_1": 0.520982,
+    "precision_at_1": 0.520982,
+    "ndcg_at_1": 0.520982,
+    "hit_at_5": 0.716152,
+    "recall_at_5": 0.233441,
+    "avg_relevant_at_5": 2.043151,
+    "precision_at_5": 0.40863,
+    "ndcg_at_5": 0.491029,
+    "hit_at_10": 0.767221,
+    "recall_at_10": 0.314809,
+    "avg_relevant_at_10": 3.448535,
+    "precision_at_10": 0.344854,
+    "ndcg_at_10": 0.484935
+  },
+  "pg_id_centroid_search": {
+    "valid_queries": 2505.0,
+    "mean_relevant_total": 32.123752,
+    "mAP": 0.381154,
+    "hit_at_1": 0.51976,
+    "recall_at_1": 0.094252,
+    "avg_relevant_at_1": 0.51976,
+    "precision_at_1": 0.51976,
+    "ndcg_at_1": 0.51976,
+    "hit_at_5": 0.716567,
+    "recall_at_5": 0.235498,
+    "avg_relevant_at_5": 2.03992,
+    "precision_at_5": 0.407984,
+    "ndcg_at_5": 0.49014,
+    "hit_at_10": 0.767665,
+    "recall_at_10": 0.317676,
+    "avg_relevant_at_10": 3.443912,
+    "precision_at_10": 0.344391,
+    "ndcg_at_10": 0.485039
+  },
+  "compare": {
+    "accuracy": 0.848367,
+    "balanced_accuracy": 0.848367,
+    "auc": 0.912817,
+    "eer": 0.159077,
+    "threshold": 1.322197
+  }
+}

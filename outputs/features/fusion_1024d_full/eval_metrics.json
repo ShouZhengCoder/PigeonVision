@@ -1,18 +1,17 @@
 {
-  "mode": "server_optimized_summary",
-  "metric_source": "server Relation-SupCon full-library evaluation; see docs/performance_improvement_journey.md",
-  "fusion": "triplet_256d + relation_supcon_256d + arcface_512d",
+  "fusion": "triplet_256d + supcon_256d + arcface_512d",
   "total_dim": 1024,
-  "gallery_size": 25690,
   "search": {
-    "hit_at_1": 0.643,
-    "hit_at_5": 0.808,
-    "hit_at_10": 0.857,
-    "mAP": 0.504
+    "recall_at_1": 0.314727,
+    "recall_at_5": 0.489707,
+    "recall_at_10": 0.562945,
+    "mAP": 0.209126
   },
   "compare": {
-    "balanced_accuracy": 0.932,
-    "auc": 0.98,
-    "threshold": 1.3097071694392783
+    "accuracy": 0.681087,
+    "balanced_accuracy": 0.681087,
+    "auc": 0.737686,
+    "eer": 0.335522,
+    "threshold": 2.277788
   }
 }

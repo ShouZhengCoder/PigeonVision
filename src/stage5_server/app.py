@@ -54,11 +54,14 @@ def index():
 def health():
     with pipeline_lock:
         gallery_size = pipeline.gallery_size
+        pg_gallery_size = pipeline.pg_gallery_size
         breed_count = pipeline.breed_count
     return jsonify(
         {
             "status": "ok",
             "gallery_size": gallery_size,
+            "image_gallery_size": gallery_size,
+            "pg_gallery_size": pg_gallery_size,
             "breed_count": breed_count,
         }
     )
@@ -116,11 +119,12 @@ def _search_from_request():
         raise ValueError("top_k 必须大于 0")
     top_k = min(top_k, MAX_SEARCH_TOP_K)
     eye_crop = request.form.get("eye_crop", "0") == "1"
+    mode = request.form.get("mode", "pg")
     image_bytes = image.read()
     if not eye_crop and not _server_yolo_enabled():
         raise ValueError("服务端 YOLO 原图兜底已禁用，请上传 Android 眼部裁剪图并设置 eye_crop=1")
     with pipeline_lock:
-        response = pipeline.search(image_bytes, top_k=top_k, eye_crop=eye_crop)
+        response = pipeline.search(image_bytes, top_k=top_k, eye_crop=eye_crop, mode=mode)
     for item in response["results"]:
         img_id = str(item.get("img_id", ""))
         if img_id:

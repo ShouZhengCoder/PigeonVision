@@ -1,0 +1,65 @@
+{
+  "mode": "eval",
+  "gallery_role": "train",
+  "query_role": "val",
+  "fusion": "relation_supcon_256d",
+  "encoders": [
+    {
+      "name": "relation_supcon",
+      "checkpoint": "/home/u2023312335/project/learn/PigeonVision/checkpoints/siamese/relation_supcon/best.pt",
+      "feat_dim": 256,
+      "backbone": "resnet34"
+    }
+  ],
+  "total_dim": 256,
+  "gallery_size": 7196,
+  "query_size": 2526,
+  "pg_id_centroid_gallery_size": 6886,
+  "search": {
+    "valid_queries": 2526.0,
+    "mean_relevant_total": 34.192399,
+    "mAP": 0.606941,
+    "hit_at_1": 0.70863,
+    "recall_at_1": 0.127817,
+    "avg_relevant_at_1": 0.70863,
+    "precision_at_1": 0.70863,
+    "ndcg_at_1": 0.70863,
+    "hit_at_5": 0.837688,
+    "recall_at_5": 0.309097,
+    "avg_relevant_at_5": 2.856295,
+    "precision_at_5": 0.571259,
+    "ndcg_at_5": 0.678172,
+    "hit_at_10": 0.878068,
+    "recall_at_10": 0.420678,
+    "avg_relevant_at_10": 5.022565,
+    "precision_at_10": 0.502257,
+    "ndcg_at_10": 0.677529
+  },
+  "pg_id_centroid_search": {
+    "valid_queries": 2505.0,
+    "mean_relevant_total": 32.123752,
+    "mAP": 0.609243,
+    "hit_at_1": 0.711377,
+    "recall_at_1": 0.129574,
+    "avg_relevant_at_1": 0.711377,
+    "precision_at_1": 0.711377,
+    "ndcg_at_1": 0.711377,
+    "hit_at_5": 0.839521,
+    "recall_at_5": 0.311833,
+    "avg_relevant_at_5": 2.858283,
+    "precision_at_5": 0.571657,
+    "ndcg_at_5": 0.679357,
+    "hit_at_10": 0.87984,
+    "recall_at_10": 0.42476,
+    "avg_relevant_at_10": 5.018363,
+    "precision_at_10": 0.501836,
+    "ndcg_at_10": 0.679518
+  },
+  "compare": {
+    "accuracy": 0.970424,
+    "balanced_accuracy": 0.970424,
+    "auc": 0.995028,
+    "eer": 0.029599,
+    "threshold": 1.178366
+  }
+}

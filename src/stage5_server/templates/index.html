@@ -613,6 +613,7 @@
       const form = new FormData();
       form.append("image", state.searchImage);
       form.append("top_k", document.getElementById("top-k").value || "10");
+      form.append("mode", "pg_boost");
       setLoading(button, true, "检索");
       target.innerHTML = `<p class="result-title">结果</p><div class="status">处理中</div>`;
       try {
