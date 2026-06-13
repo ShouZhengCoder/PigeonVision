@@ -211,9 +211,11 @@
 | 任务 | 指标 | 值 |
 |------|------|:------:|
 | **Search** | Hit@1 | **70.9%** |
+| | Hit@5 | **83.8%** |
 | | Hit@10 | **87.8%** |
 | | mAP | **60.7%** |
 | **Compare** | AUC | **99.5%** |
+| | BalAcc | **97.0%** |
 
 ### 6.2 用户视角解读
 
@@ -252,24 +254,24 @@ API: Flask, /search + /compare endpoints
 
 ## 八、关键经验教训
 
-1. **单标签评估高估效果**：小验证集内检索 + blood_name 匹配给出的 R@5=89% 是误导性的。多标签跨集合评估给出 R@10=52%，更接近真实使用场景。
+1. **假负样本是多标签度量学习的致命陷阱**：Triplet Loss 按 single blood_id 定义正负，但每图 ~6.4 个 blood_id 导致大量假负样本。Graded relevance + IDF 加权的 Relation-SupCon 是解决此问题的有效方案。
 
-2. **Pair-based loss 瓶颈**：Triplet/SupCon 复杂度 O(B²)，每次只用 batch 内 64 张图。对于 6,626 品种的检索任务，这是根本性的架构局限。
+2. **损失函数选择比模型结构更重要**：从 Triplet 换到 Relation-SupCon 带来 Hit@1 +16.6%，远超增加数据量或增大 backbone 的收益。
 
-3. **多标签训练比预期难**：血脉图过于密集（每图平均 7 个 blood_id），泛化正样本导致嵌入空间弥散。单标签训练反而形成更紧致的类簇。
+3. **单路强编码器优于多路融合**：三路融合（Triplet+SupCon+ArcFace）中弱编码器的噪声信号稀释了强编码器的干净信号。纯 Relation-SupCon 256d 在所有指标上优于三路 1024d。
 
-4. **模型融合是低成本提效方案**：两个互补模型的 embedding 拼接（Concat 512d），无需重训即可同时获得检索和比对的最优效果。
+4. **对照实验是验证因果关系的必要手段**：通过控制变量实验区分了损失函数贡献（+16.6%）和数据量贡献（+18.8%），结论可信。
 
-5. **Proxy-based loss 是正确方向**：ArcFace/Proxy-Anchor 复杂度 O(C×B)，在大量类别时天然优于 pair-based loss，但实现和收敛需要更多调优。
+5. **IDF 加权区分强弱正样本**：稀有 blood_id 的共享比常见 blood_id 的共享更有信息量，这对密集多标签数据至关重要。
 
 ---
 
 ## 九、下一步方向
 
-1. **可直接部署**：Concat 512d 融合模型 + Flask API，当前效果已可用
-2. **短期提升**：完成 ArcFace 单标签训练（ResNet50 + 512dim + 6626类），预计可提升检索 5-10%
-3. **中期探索**：ArcFace 收敛后用 blood_id 重合信息做 multi-proxy 微调
-4. **长期方向**：更大的 backbone（ViT/EfficientNet）、数据增强优化、血脉关系图建模
+1. **可直接部署**：Relation-SupCon 256d 单路模型 + Flask API，当前 Hit@1=70.9%, AUC=99.5%
+2. **短期提升**：继续训练更多 epoch（当前 60 epoch loss 仍在下降），或增大 batch size 提供更丰富负样本
+3. **中期探索**：用 Circle Loss 或 Multi-Similarity Loss 替代 weighted SupCon，进一步优化强弱正样本权重
+4. **长期方向**：更大的 backbone（ViT/EfficientNet）、数据增强优化、血缘关系图建模
 
 ---
 

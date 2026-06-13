@@ -28,8 +28,8 @@
   └─[Stage 2: YOLOv5]─→ 眼部 bbox 裁剪 (25,766 张)
        └─[Stage 3: U-Net分割 + Daugman 椭圆展开 + iris mask过滤]─→ 64×512 三通道虹膜纹理图 (25,690 张)
             └─[Stage 4: IrisEncoder]─→ 256/512-dim L2归一化特征向量
-                 ├─[Stage 5: /compare]─→ 欧氏距离 + 阈值判断 (当前 AUC 99.5%)
-                 └─[Stage 5: /search]─→ FAISS IndexFlatL2 Top-K (当前 Hit@1 70.9%, Hit@10 87.8%)
+                 ├─[Stage 5: /compare]─→ 欧氏距离 + 阈值判断 (当前 AUC 99.5%, BalAcc 97.0%)
+                 └─[Stage 5: /search]─→ FAISS IndexFlatL2 Top-K (当前 Hit@1 70.9%, Hit@5 83.8%, Hit@10 87.8%, mAP 60.7%)
 
 模型配置：
   Relation-SupCon 256d 单路模型 (当前最佳):

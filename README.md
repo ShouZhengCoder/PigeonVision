@@ -76,9 +76,11 @@ App 支持两种任务：
 | 任务 | 指标 | 值 |
 |------|------|:--:|
 | Search | Hit@1 | **70.9%** |
+| | Hit@5 | **83.8%** |
 | | Hit@10 | **87.8%** |
 | | mAP | **60.7%** |
 | Compare | AUC | **99.5%** |
+| | BalAcc | **97.0%** |
 
 > 当前服务器优化版采用单路 `relation_supcon_256d` 特征，生产检索库 `outputs/features/relation_supcon_256d/` 使用 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的虹膜图，当前全量 25,690 张。旧三路融合 `fusion_1024d_full` 方案为 Hit@1 64.3%、Hit@10 85.7%、mAP 50.4%、Compare AUC 98.0%。详细实验记录见 [docs/experiments.md](docs/experiments.md) 和 [docs/performance_improvement_journey.md](docs/performance_improvement_journey.md)。
 
