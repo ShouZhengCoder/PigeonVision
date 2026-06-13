@@ -48,6 +48,7 @@ SYNC_FILES = [
     "outputs/features/fusion_1024d_full/eval_metrics.json",
     "outputs/features/fusion_1024d_full/eval_comparison.json",
     "outputs/features/fusion_1024d_full/threshold.json",
+    "outputs/features/fusion_1024d_full/build_manifest.json",
     # Checkpoints
     "checkpoints/detection/exp/weights/best.pt",
     "checkpoints/segmentation/best.pt",
@@ -55,6 +56,7 @@ SYNC_FILES = [
     "checkpoints/siamese/last.pt",
     "checkpoints/siamese/supcon/best.pt",
     "checkpoints/siamese/supcon/last.pt",
+    "checkpoints/siamese/relation_supcon/best.pt",
     "checkpoints/siamese/arcface_v2/best.pt",
     "checkpoints/siamese/arcface/best.pt",
     "checkpoints/siamese/pk_supcon/best.pt",
