@@ -64,7 +64,10 @@ class UNetPredictor:
     def _load_weights(self) -> None:
         if not self.checkpoint_path.exists():
             raise FileNotFoundError(f"Missing segmentation checkpoint: {self.checkpoint_path}")
-        state = torch.load(self.checkpoint_path, map_location=self.device)
+        try:
+            state = torch.load(self.checkpoint_path, map_location=self.device, weights_only=False)
+        except TypeError:
+            state = torch.load(self.checkpoint_path, map_location=self.device)
         if isinstance(state, dict):
             for key in ("model_state", "state_dict", "model"):
                 if key in state:

@@ -1,0 +1,23 @@
+{
+  "mode": "full",
+  "fusion": "relation_supcon_256d",
+  "encoders": [
+    {
+      "name": "relation_supcon",
+      "checkpoint": "/home/u2023312335/project/learn/PigeonVision/checkpoints/siamese/relation_supcon/best.pt",
+      "feat_dim": 256,
+      "backbone": "resnet34"
+    }
+  ],
+  "total_dim": 256,
+  "gallery_size": 25690,
+  "metadata_stats": {
+    "normalize_success": 25690,
+    "png_exists": 25690,
+    "rows": 25690,
+    "with_relations": 25690,
+    "with_pigeon_meta": 22012,
+    "with_blood_name": 19573
+  },
+  "threshold_source": "/home/u2023312335/project/learn/PigeonVision/outputs/features/relation_supcon_256d_eval/threshold.json"
+}

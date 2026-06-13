@@ -102,7 +102,7 @@ class IrisPipeline:
         self.detection_confidence = float(detection_confidence)
         self.detection_expand_ratio = float(detection_expand_ratio)
 
-        # In fusion mode, the service must use the matching 1024d gallery.
+        # In fusion mode, the service must use the matching production gallery.
         if self.fusion:
             faiss_index_path = FUSION_DEFAULT_DIR / "faiss_index.bin"
             feature_meta_path = FUSION_DEFAULT_DIR / "feature_db_meta.csv"
@@ -506,7 +506,10 @@ class IrisPipeline:
         return FUSION_ENCODERS
 
     def _load_single_encoder(self, checkpoint_path: Path, feat_dim: int = 256, backbone: str = "resnet34") -> IrisEncoder:
-        state = torch.load(checkpoint_path, map_location=self.device)
+        try:
+            state = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        except TypeError:
+            state = torch.load(checkpoint_path, map_location=self.device)
         checkpoint_config = state.get("config", {}) if isinstance(state, dict) else {}
         dim = int(checkpoint_config.get("feat_dim", feat_dim))
         arch = str(checkpoint_config.get("backbone", backbone))
@@ -657,7 +660,15 @@ class IrisPipeline:
     @staticmethod
     def _resolve(path: str | Path) -> Path:
         path = Path(path)
-        return path if path.is_absolute() else ROOT / path
+        if not path.is_absolute():
+            return ROOT / path
+        if path.exists():
+            return path
+        marker = "PigeonVision"
+        if marker in path.parts:
+            marker_idx = len(path.parts) - 1 - list(reversed(path.parts)).index(marker)
+            return ROOT.joinpath(*path.parts[marker_idx + 1:])
+        return path
 
     @staticmethod
     def _load_yaml(path: Path) -> dict[str, Any]:

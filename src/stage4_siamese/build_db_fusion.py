@@ -4,8 +4,9 @@ Modes:
 - eval: train images are the gallery, val images are the query set.
 - full: all successful normalized iris PNGs are the production gallery.
 
-Triplet 256d + SupCon 256d + ArcFace 512d -> per-part L2 norm -> concat
--> global L2 norm -> 1024d.
+Default: Relation-SupCon 256d single encoder.
+Legacy fusion can be reproduced with:
+  --encoders triplet,relation_supcon,arcface
 """
 from __future__ import annotations
 
@@ -34,9 +35,9 @@ from relation_metrics import (
 )
 
 
-DEFAULT_EVAL_DIR = ROOT / "outputs" / "features" / "fusion_1024d_eval"
-DEFAULT_FULL_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full"
-DEFAULT_FULL_PG_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full_pg"
+DEFAULT_EVAL_DIR = ROOT / "outputs" / "features" / "relation_supcon_256d_eval"
+DEFAULT_FULL_DIR = ROOT / "outputs" / "features" / "relation_supcon_256d"
+DEFAULT_FULL_PG_DIR = ROOT / "outputs" / "features" / "relation_supcon_256d_pg"
 IRIS_DIR = ROOT / "outputs" / "iris_normalized"
 ENCODER_REGISTRY: dict[str, tuple[str, Path, int, str]] = {
     "triplet":          ("triplet",          ROOT / "checkpoints" / "siamese" / "best.pt",               256, "resnet34"),
@@ -97,12 +98,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--device", default=None)
-    parser.add_argument("--output-dir", type=Path, default=None, help="Defaults to fusion_1024d_eval or fusion_1024d_full by mode.")
+    parser.add_argument("--output-dir", type=Path, default=None, help="Defaults to auto-generated <encoder>_<dim>d_eval or <encoder>_<dim>d by mode.")
     parser.add_argument(
         "--checkpoint",
         type=Path,
         default=None,
-        help="Optional checkpoint replacing the SupCon branch while keeping the 1024d fusion layout.",
+        help="Optional checkpoint replacing the first SupCon/Relation-SupCon branch.",
     )
     parser.add_argument("--checkpoint-feat-dim", type=int, default=256)
     parser.add_argument("--checkpoint-backbone", default="resnet34")

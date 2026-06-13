@@ -1,0 +1,33 @@
+{
+  "mode": "server_optimized_summary",
+  "metric_source": "server runtime comparison, 2026-06-13",
+  "legacy_fusion_1024d": {
+    "fusion": "triplet_256d + relation_supcon_256d + arcface_512d",
+    "total_dim": 1024,
+    "model_count": 3,
+    "gallery_size": 25690,
+    "search": {
+      "hit_at_1": 0.643,
+      "hit_at_10": 0.857,
+      "mAP": 0.504
+    },
+    "compare": {
+      "auc": 0.98
+    }
+  },
+  "current_relation_supcon_256d": {
+    "fusion": "relation_supcon_256d",
+    "total_dim": 256,
+    "model_count": 1,
+    "gallery_size": 25690,
+    "search": {
+      "hit_at_1": 0.709,
+      "hit_at_10": 0.878,
+      "mAP": 0.607
+    },
+    "compare": {
+      "auc": 0.995,
+      "threshold": 1.1783658425013224
+    }
+  }
+}
