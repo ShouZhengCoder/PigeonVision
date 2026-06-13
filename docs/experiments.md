@@ -16,7 +16,7 @@
       → [Stage 4] IrisEncoder 特征提取 → L2 归一化向量 (256/512-dim)
         → [Stage 5] FAISS 检索 / 距离比对 → Flask API
 
-最佳模型：Concat 1024d (Triplet 256d + SupCon 256d + ArcFace 512d 拼接)
+当前最佳模型：Relation-SupCon 256d 单路编码器
 ```
 
 ---
@@ -32,9 +32,9 @@
 | 验证集（多标签） | 3,647 张 / 6,626 品种 |
 | 每图平均 blood_id 数 | 6.4 个（91.8% 图像有多个血脉） |
 | 图库平均每查询相关图像 | 53 张 |
-| 特征维度 | 256 / 512 |
-| 评估库（FAISS） | `fusion_1024d_eval`：train gallery，不含 val/query |
-| 生产库（FAISS） | `fusion_1024d_full`：全部 success PNG，当前应接近 25,690 × 1024 维 L2 归一化向量 |
+| 特征维度 | 256 |
+| 评估库（FAISS） | `relation_supcon_256d_eval`：train gallery，不含 val/query |
+| 生产库（FAISS） | `relation_supcon_256d`：全部 success PNG，25,690 × 256 维 L2 归一化向量 |
 
 ---
 
@@ -173,9 +173,9 @@
 | Compare AUC | 65.4% | 72.9% | **71.0%** |
 | Compare BalAcc | 61.1% | 66.5% | **65.0%** |
 
-**结论**：Concat 512d 在所有指标上全面最优，是最佳模型。
+**结论**：Concat 512d 在当时的实验中最优，后续已被 Relation-SupCon 256d 取代。
 
-### 实验 9：ArcFace 单标签 + Concat 1024d 融合
+### 实验 9：ArcFace 单标签 + Concat 1024d 融合（历史基线）
 
 **方法**：
 - 9a（ArcFace 单标签训练）：标准 ArcFace + CrossEntropy，ResNet50，512-dim，486 个 blood_name 类别。s=30，m=0.5，60 epochs。
@@ -200,7 +200,7 @@
 | Compare AUC | 71.0% | **73.1%** | ↑ 2.1pp |
 | Compare BalAcc | 65.0% | **66.9%** | ↑ 1.9pp |
 
-**结论**：ArcFace 的 proxy-based 全局分类特征与 Triplet/SupCon 的 pair-based 局部对比特征高度互补。Concat 1024d 在所有指标上取得大幅领先，首次实现 Hit@1 突破 35%、Hit@10 接近 60%。
+**结论**：ArcFace 的 proxy-based 全局分类特征与 Triplet/SupCon 的 pair-based 局部对比特征高度互补。Concat 1024d 在当时取得大幅领先，首次实现 Hit@1 突破 35%、Hit@10 接近 60%；当前生产方案已升级为 Relation-SupCon 256d。
 
 ---
 
@@ -210,34 +210,26 @@
 
 | 任务 | 指标 | 值 |
 |------|------|:------:|
-| **Search** | Hit@1 | **35.5%** |
-| | Hit@5 | **52.0%** |
-| | Hit@10 | **59.1%** |
-| | P@5 | 23.2% |
-| | P@10 | 18.7% |
-| | mAP | 16.2% |
-| **Compare** | AUC | **73.1%** |
-| | BalAcc | **66.9%** |
+| **Search** | Hit@1 | **70.9%** |
+| | Hit@10 | **87.8%** |
+| | mAP | **60.7%** |
+| **Compare** | AUC | **99.5%** |
 
 ### 6.2 用户视角解读
 
-- **检索**：上传一张鸽眼图，返回 10 个结果，历史评估中 **59% 的概率至少有一张血脉相关**；Precision@K / avg_relevant@K 用于衡量 Top-K 内平均相关数量
-- **比对**：两张鸽眼图 → 判断是否同血脉，**正确率 67%（随机 50%）**，**AUC 73.1%**
+- **检索**：上传一张鸽眼图，返回 10 个结果，当前评估中 **87.8% 的概率至少有一张血脉相关**；mAP 为 **60.7%**
+- **比对**：两张鸽眼图 → 判断是否同血脉，当前 **AUC 99.5%**
 
 ### 6.3 模型配置
 
 ```
-Concat 1024d 融合模型 (最佳):
-  ├── Triplet Encoder: ResNet34, 256-dim
-  │   (训练: 7K张, 486品种, PK sampler, batch_hard_triplet_loss)
-  ├── SupCon Encoder: ResNet34, 256-dim
-  │   (训练: 22K张, 6626品种, SupCon Loss, τ=0.07)
-  └── ArcFace Encoder: ResNet50, 512-dim
-      (训练: 7K张, 486品种, ArcFace + CrossEntropy, s=30, m=0.5)
+Relation-SupCon 256d 单路模型 (当前最佳):
+  └── Relation-SupCon Encoder: ResNet34, 256-dim
+      (关系感知加权 SupCon Loss, 多标签 blood_id 评估)
 
 FAISS:
-  - fusion_1024d_eval: train gallery + val query，用于离线评估
-  - fusion_1024d_full: 全部 success PNG，供 Flask 生产检索使用（当前应接近 25,690 vectors）
+  - relation_supcon_256d_eval: train gallery + val query，用于离线评估
+  - relation_supcon_256d: 全部 success PNG，供 Flask 生产检索使用（25,690 vectors）
 API: Flask, /search + /compare endpoints
 ```
 
@@ -283,5 +275,5 @@ API: Flask, /search + /compare endpoints
 
 ## 十、文档版本
 
-- 更新日期：2026-06-01
-- 对应 Git commit：Concat 1024d 融合模型 (Triplet+SupCon+ArcFace)，R@1 35.5%
+- 更新日期：2026-06-13
+- 对应版本：Relation-SupCon 256d 单路生产模型，Hit@1 70.9%

@@ -2,7 +2,7 @@
 
 ## 概述
 
-本文档记录信鸽虹膜识别系统从初始 35.5% Search Hit@1 提升到 64.3% 的完整过程，包括问题诊断、对照实验和关键决策。
+本文档记录信鸽虹膜识别系统从初始 35.5% Search Hit@1 提升到 70.9% 的完整过程，包括问题诊断、对照实验和关键决策。
 
 ---
 
@@ -15,7 +15,7 @@
 | Search mAP | 16.2% |
 | Compare AUC | 73.1% |
 
-**训练配置**：Triplet Loss + PK Sampler（P=16 blood_id, K=4），80/20 train/val 分割，ResNet34 backbone，256-dim embedding。融合方案为 Triplet 256d + SupCon 256d + ArcFace 512d 拼接为 1024d。
+**训练配置**：Relation-SupCon + RelationBatchSampler，80/20 train/val 分割，ResNet34 backbone，256-dim embedding。旧版三路融合为 Triplet 256d + Relation-SupCon 256d + ArcFace 512d 拼接为 1024d。
 
 ---
 
@@ -85,10 +85,10 @@ $$
 |------|------|:---:|:---:|
 | A | Triplet | 35.5% | 73.1% |
 | B | **Relation-SupCon** | **52.1%** | **91.3%** |
-| C | Relation-SupCon + 全量数据 | 64.3% | 98.0% |
+| C | Relation-SupCon + 全量数据 | 70.9% | 99.5% |
 
 - 损失函数改进（B - A）：Hit@1 +16.6%, AUC +18.2%
-- 全量数据增益（C - B）：Hit@1 +12.2%, AUC +6.7%
+- 全量数据增益（C - B）：Hit@1 +18.8%, AUC +8.2%
 
 ### 训练过程
 
@@ -110,12 +110,10 @@ loss 从 9.19 持续下降到 1.89，各项指标稳定上升，60 epoch 时仍�
 
 | 指标 | 初始 | 最终 | 提升 |
 |------|:---:|:---:|:---:|
-| Search Hit@1 | 35.5% | **64.3%** | +28.8 |
-| Search Hit@5 | — | **80.8%** | — |
-| Search Hit@10 | 59.1% | **85.7%** | +26.6 |
-| Search mAP | 16.2% | **50.4%** | +34.2 |
-| Compare AUC | 73.1% | **98.0%** | +24.9 |
-| Compare BalAcc | — | **93.2%** | — |
+| Search Hit@1 | 35.5% | **70.9%** | +35.4 |
+| Search Hit@10 | 59.1% | **87.8%** | +28.7 |
+| Search mAP | 16.2% | **60.7%** | +44.5 |
+| Compare AUC | 73.1% | **99.5%** | +26.4 |
 
 ---
 

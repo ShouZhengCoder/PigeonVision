@@ -56,7 +56,7 @@ def load_img_index():
 - `pigeon.csv` has 11 columns: `ID, PID, CID, SID, NAME, COLOR, EYE, PG_ID, SEX, BLOOD, IMG`; field `weidth` in annotation JSONs is a typo for `width` — use as-is
 - Stage 4 expects 3-channel RGB input; `outputs/iris_normalized/*.png` should be 64×512 3-channel normalized iris images
 - Multi-label bloodlines: each image averages 6.4 blood_ids; evaluation must use blood_id overlap (not blood_name match) for accuracy
-- Best model: Concat 1024d fusion (Triplet 256-dim + SupCon 256-dim + ArcFace 512-dim concatenated)
+- Best/current production model: Relation-SupCon 256d single encoder (`checkpoints/siamese/relation_supcon/best.pt`) with `outputs/features/relation_supcon_256d/`; legacy 1024d fusion is retained only as an old baseline
 
 ## Stage Status
 

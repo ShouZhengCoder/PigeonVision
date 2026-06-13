@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -40,7 +41,8 @@ def test_pipeline_direct(eye_crop_path: Path) -> None:
     # --- search with eye_crop=True ---
     print("\n[test] /search  eye_crop=True ...")
     t0 = time.time()
-    results = pipe.search(img_bytes, top_k=5, eye_crop=True)
+    response = pipe.search(img_bytes, top_k=5, eye_crop=True)
+    results = response.get("results", [])
     elapsed = time.time() - t0
     print(f"  耗时 {elapsed*1000:.0f}ms，返回 {len(results)} 条结果：")
     for r in results:
@@ -60,9 +62,13 @@ def test_pipeline_direct(eye_crop_path: Path) -> None:
 
     # --- search with eye_crop=False（走 YOLO 路径，对比耗时）---
     print("\n[test] /search  eye_crop=False（走 YOLO，对比耗时）...")
+    if os.environ.get("PIGEONVISION_ENABLE_SERVER_YOLO", "").strip().lower() not in {"1", "true", "yes"}:
+        print("  已跳过：服务端 YOLO 原图兜底默认禁用；Android 正常路径使用 eye_crop=True")
+        return
     t0 = time.time()
     try:
-        results2 = pipe.search(img_bytes, top_k=5, eye_crop=False)
+        response2 = pipe.search(img_bytes, top_k=5, eye_crop=False)
+        results2 = response2.get("results", [])
         elapsed2 = time.time() - t0
         print(f"  耗时 {elapsed2*1000:.0f}ms，返回 {len(results2)} 条")
         if results and results2:
@@ -82,10 +88,11 @@ def test_http(eye_crop_path: Path, host: str) -> None:
     import json
 
     base = f"http://{host}"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     # health check
     try:
-        with urllib.request.urlopen(f"{base}/health", timeout=5) as resp:
+        with opener.open(f"{base}/health", timeout=5) as resp:
             health = json.loads(resp.read())
         print(f"[http] /health OK: {health}")
     except Exception as e:
@@ -117,7 +124,7 @@ def test_http(eye_crop_path: Path, host: str) -> None:
             headers={"Content-Type": f"multipart/form-data; boundary={boundary.decode()}"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with opener.open(req, timeout=30) as resp:
             return json.loads(resp.read())
 
     # search eye_crop=1

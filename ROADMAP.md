@@ -28,18 +28,16 @@
   └─[Stage 2: YOLOv5]─→ 眼部 bbox 裁剪 (25,766 张)
        └─[Stage 3: U-Net分割 + Daugman 椭圆展开 + iris mask过滤]─→ 64×512 三通道虹膜纹理图 (25,690 张)
             └─[Stage 4: IrisEncoder]─→ 256/512-dim L2归一化特征向量
-                 ├─[Stage 5: /compare]─→ 欧氏距离 + 阈值判断 (当前 AUC 98.0%)
-                 └─[Stage 5: /search]─→ FAISS IndexFlatL2 Top-K (当前 Hit@1 64.3%, Hit@10 85.7%)
+                 ├─[Stage 5: /compare]─→ 欧氏距离 + 阈值判断 (当前 AUC 99.5%)
+                 └─[Stage 5: /search]─→ FAISS IndexFlatL2 Top-K (当前 Hit@1 70.9%, Hit@10 87.8%)
 
 模型配置：
-  Concat 1024d 融合模型 (最佳):
-    ├── Triplet Encoder: ResNet34, 256-dim (PK sampler, batch_hard_triplet_loss)
-    ├── Relation-SupCon Encoder: ResNet34, 256-dim (关系感知加权 SupCon Loss)
-    └── ArcFace Encoder: ResNet50, 512-dim (ArcFace + CrossEntropy, s=30, m=0.5)
+  Relation-SupCon 256d 单路模型 (当前最佳):
+    └── Relation-SupCon Encoder: ResNet34, 256-dim (关系感知加权 SupCon Loss)
   
   FAISS:
-    ├── fusion_1024d_eval: train gallery + val query, 用于评估
-    └── fusion_1024d_full: 全量 success PNG, Flask 生产检索库（约 25,690 vectors）
+    ├── relation_supcon_256d_eval: train gallery + val query, 用于评估
+    └── relation_supcon_256d: 全量 success PNG, Flask 生产检索库（25,690 vectors）
   API: Flask, /search + /compare + /health endpoints
 ```
 
@@ -89,13 +87,13 @@ PigeonVision/
 │   ├── eye_crops/                    ← YOLO 裁剪的眼部图像
 │   ├── iris_normalized/              ← U-Net + 椭圆展开 + mask 过滤后的虹膜图像（64×512）
 │   └── features/
-│       ├── fusion_1024d_eval/        ← 评估库：train gallery + val query 指标
+│       ├── relation_supcon_256d_eval/ ← 评估库：train gallery + val query 指标
 │       │   ├── feature_db.npy
 │       │   ├── feature_db_meta.csv
 │       │   ├── faiss_index.bin
 │       │   ├── eval_metrics.json
 │       │   └── threshold.json
-│       └── fusion_1024d_full/        ← 生产库：Flask 默认读取的全量检索库
+│       └── relation_supcon_256d/     ← 生产库：Flask 默认读取的全量检索库
 │           ├── feature_db.npy
 │           ├── feature_db_meta.csv
 │           ├── faiss_index.bin
@@ -435,9 +433,9 @@ min_db_images_per_blood: 20
 | 6 | Proxy-Anchor Loss | 未收敛 | ❌ |
 | 7 | ArcFace Loss | 7a (BCE) 不收敛，7b (单标签) 未运行 | ⚠️ |
 | **8** | **MoE Concat 512d** | R@1 25.9%, R@10 51.8%, AUC 71.0% | ✅ |
-| **9** | **Relation-SupCon + 全量融合库** | **当前最优**：Hit@1 64.3%, Hit@10 85.7%, AUC 98.0% | ✅ |
+| **9** | **Relation-SupCon + 全量检索库** | **当前最优**：Hit@1 70.9%, Hit@10 87.8%, mAP 60.7%, AUC 99.5% | ✅ |
 
-**最佳模型**：Concat 1024d（Triplet 256d + Relation-SupCon 256d + ArcFace 512d 拼接），Flask 生产检索默认使用该融合特征库。历史 `Triplet + SupCon + ArcFace` 方案保留为对照基线。
+**最佳模型**：Relation-SupCon 256d 单路编码器，Flask 生产检索默认使用 `outputs/features/relation_supcon_256d/`。旧三路融合 `fusion_1024d_full` 方案保留为对照基线。
 
 详细实验记录见 `docs/experiments.md`。
 
@@ -456,25 +454,25 @@ min_db_images_per_blood: 20
 | `src/stage4_siamese/train_arcface.py` | ArcFace 训练脚本 |
 | `src/stage4_siamese/train_proxy_anchor.py` | Proxy-Anchor 训练脚本 |
 | `src/stage4_siamese/build_db.py` | 构建 FAISS 特征数据库 + 双标准评估 |
-| `src/stage4_siamese/build_db_fusion.py` | Concat 1024d 融合库构建，支持 `--mode eval/full` |
+| `src/stage4_siamese/build_db_fusion.py` | Relation-SupCon 256d / 多 encoder 特征库构建，支持 `--mode eval/full` |
 | `src/stage4_siamese/relation_metrics.py` | 多标签 blood_id 评估指标 |
 | `checkpoints/siamese/best.pt` | 最优 Triplet 编码器权重 |
 | `checkpoints/siamese/supcon/best.pt` | 最优 SupCon 编码器权重 |
 | `checkpoints/siamese/relation_supcon/best.pt` | 当前生产 Relation-SupCon 编码器权重 |
-| `outputs/features/fusion_1024d_eval/feature_db.npy` | 评估 gallery 特征矩阵（train only） |
-| `outputs/features/fusion_1024d_eval/eval_metrics.json` | val query 对 train gallery 的评估指标 |
-| `outputs/features/fusion_1024d_eval/threshold.json` | 评估集上得到的 Compare 阈值 |
-| `outputs/features/fusion_1024d_full/feature_db.npy` | 生产全量特征矩阵（全部 success PNG） |
-| `outputs/features/fusion_1024d_full/feature_db_meta.csv` | img_id, pg_id, blood, blood_id, blood_name |
-| `outputs/features/fusion_1024d_full/faiss_index.bin` | Flask 默认读取的 FAISS IndexFlatL2 |
-| `outputs/features/fusion_1024d_full/threshold.json` | Flask 默认读取的阈值 JSON |
+| `outputs/features/relation_supcon_256d_eval/feature_db.npy` | 评估 gallery 特征矩阵（train only） |
+| `outputs/features/relation_supcon_256d_eval/eval_metrics.json` | val query 对 train gallery 的评估指标 |
+| `outputs/features/relation_supcon_256d_eval/threshold.json` | 评估集上得到的 Compare 阈值 |
+| `outputs/features/relation_supcon_256d/feature_db.npy` | 生产全量特征矩阵（全部 success PNG） |
+| `outputs/features/relation_supcon_256d/feature_db_meta.csv` | img_id, pg_id, blood, blood_id, blood_name |
+| `outputs/features/relation_supcon_256d/faiss_index.bin` | Flask 默认读取的 FAISS IndexFlatL2 |
+| `outputs/features/relation_supcon_256d/threshold.json` | Flask 默认读取的阈值 JSON |
 
 ### build_db_fusion.py 逻辑
 
-- `--mode eval`：读取 `data/train_meta.csv` 作为 gallery，读取 `data/val_meta.csv` 作为 query；两者都必须落在 `normalize_meta.csv status=success` 且 PNG 存在集合内；输出到 `outputs/features/fusion_1024d_eval/`；**不得把 val/query 混入评估 gallery**。
-- `--mode full`：读取 `outputs/iris_normalized/normalize_meta.csv` 中全部 `status=success` 的 img_id，并确认 `outputs/iris_normalized/<img_id>.png` 存在；关联 `pigeon.csv` 的 `PG_ID/BLOOD` 和 `relations.csv` 的 blood_id；输出到 `outputs/features/fusion_1024d_full/`，供 Flask 默认读取。
+- `--mode eval`：读取 `data/train_meta.csv` 作为 gallery，读取 `data/val_meta.csv` 作为 query；两者都必须落在 `normalize_meta.csv status=success` 且 PNG 存在集合内；默认输出到 `outputs/features/relation_supcon_256d_eval/`；**不得把 val/query 混入评估 gallery**。
+- `--mode full`：读取 `outputs/iris_normalized/normalize_meta.csv` 中全部 `status=success` 的 img_id，并确认 `outputs/iris_normalized/<img_id>.png` 存在；关联 `pigeon.csv` 的 `PG_ID/BLOOD` 和 `relations.csv` 的 blood_id；默认输出到 `outputs/features/relation_supcon_256d/`，供 Flask 默认读取。
 - 两种模式都保存 `feature_db.npy`、`feature_db_meta.csv` 和 `faiss_index.bin`；eval 额外保存 `eval_metrics.json` / `eval_comparison.json` / `threshold.json`；full 复制 eval 阈值并保存 `build_manifest.json`。
-- Concat 1024d 特征拼接后会再做整体 L2 归一化，保证离线 gallery 与 Flask 在线 query 尺度一致；当前默认 encoder 顺序为 `triplet_256d + relation_supcon_256d + arcface_512d`。
+- 当前默认 encoder 为 `relation_supcon`，输出 256d L2 归一化特征；旧 1024d 融合可通过 `--encoders triplet,relation_supcon,arcface` 复现。
 
 命令：
 
@@ -505,8 +503,8 @@ python src/stage4_siamese/build_db_fusion.py --mode full
 ### 验收标准
 - Search Hit@1 ≥ 20%（基于多标签 blood_id 评估）
 - Compare AUC ≥ 65%
-- `outputs/features/fusion_1024d_eval/faiss_index.bin` 存在，且评估 gallery 只含 train
-- `outputs/features/fusion_1024d_full/faiss_index.bin` 存在，feature_db_meta.csv 行数接近 `normalize_meta.csv` 中 success PNG 数（当前约 25,690）
+- `outputs/features/relation_supcon_256d_eval/faiss_index.bin` 存在，且评估 gallery 只含 train
+- `outputs/features/relation_supcon_256d/faiss_index.bin` 存在，feature_db_meta.csv 行数接近 `normalize_meta.csv` 中 success PNG 数（当前 25,690）
 
 ---
 
@@ -568,12 +566,12 @@ def process_image(img_bytes):
 启动时加载三个模型：
 - YOLOv5（眼部检测，`checkpoints/detection/exp/weights/best.pt`）
 - U-Net（虹膜分割，`checkpoints/segmentation/best.pt`）
-- IrisEncoder（特征提取，`checkpoints/siamese/best.pt` 或 Concat 1024d 融合）
-- FAISS Index（检索，Concat 1024d 默认读取 `outputs/features/fusion_1024d_full/faiss_index.bin`）
-- Metadata（默认读取 `outputs/features/fusion_1024d_full/feature_db_meta.csv`）
-- Threshold（优先读取 `outputs/features/fusion_1024d_full/threshold.json`）
+- IrisEncoder（特征提取，默认 `checkpoints/siamese/relation_supcon/best.pt`）
+- FAISS Index（检索，默认读取 `outputs/features/relation_supcon_256d/faiss_index.bin`）
+- Metadata（默认读取 `outputs/features/relation_supcon_256d/feature_db_meta.csv`）
+- Threshold（优先读取 `outputs/features/relation_supcon_256d/threshold.json`）
 
-`fusion_1024d_full` 是生产检索库，应由 `build_db_fusion.py --mode full` 构建，包含 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的样本。`fusion_1024d_eval` 只用于离线评估，不应作为 Flask 生产 gallery。
+`relation_supcon_256d` 是生产检索库，应由 `build_db_fusion.py --mode full` 构建，包含 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的样本。`relation_supcon_256d_eval` 只用于离线评估，不应作为 Flask 生产 gallery。
 
 ### 验收标准
 - 两个接口均能返回正确 JSON

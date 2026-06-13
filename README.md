@@ -37,7 +37,7 @@ pip install -r requirements.txt
 
 ### 4. 运行服务
 
-Flask 默认读取生产检索库 `outputs/features/fusion_1024d_full/`。如果该目录还是旧的评估 gallery，先构建评估库和生产库：
+Flask 默认读取生产检索库 `outputs/features/relation_supcon_256d/`。如果该目录缺失，先构建评估库和生产库：
 
 ```bash
 python src/stage4_siamese/build_db_fusion.py --mode eval
@@ -75,11 +75,12 @@ App 支持两种任务：
 
 | 任务 | 指标 | 值 |
 |------|------|:--:|
-| Search | Hit@1 | **64.3%** |
-| | Hit@10 | **85.7%** |
-| Compare | AUC | **98.0%** |
+| Search | Hit@1 | **70.9%** |
+| | Hit@10 | **87.8%** |
+| | mAP | **60.7%** |
+| Compare | AUC | **99.5%** |
 
-> 当前服务器优化版采用 `triplet_256d + relation_supcon_256d + arcface_512d` 融合特征，生产检索库 `fusion_1024d_full` 使用 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的虹膜图，当前全量约 25,690 张。历史 `triplet + supcon + arcface` 方案为 Hit@1 35.5%、Hit@10 59.1%、Compare AUC 73.1%。详细实验记录见 [docs/experiments.md](docs/experiments.md) 和 [docs/performance_improvement_journey.md](docs/performance_improvement_journey.md)。
+> 当前服务器优化版采用单路 `relation_supcon_256d` 特征，生产检索库 `outputs/features/relation_supcon_256d/` 使用 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的虹膜图，当前全量 25,690 张。旧三路融合 `fusion_1024d_full` 方案为 Hit@1 64.3%、Hit@10 85.7%、mAP 50.4%、Compare AUC 98.0%。详细实验记录见 [docs/experiments.md](docs/experiments.md) 和 [docs/performance_improvement_journey.md](docs/performance_improvement_journey.md)。
 
 ## 项目结构
 
@@ -90,7 +91,7 @@ PigeonVision/
 │   ├── stage2_detection/    # YOLOv5 眼部检测训练与推理
 │   ├── stage3_preprocess/   # U-Net 虹膜分割 + Daugman 椭圆展开 + iris mask过滤
 │   ├── stage4_siamese/      # IrisEncoder 训练 + FAISS 特征库 + 多模型融合
-│   ├── stage5_server/       # Flask 后端服务 (默认 Concat 1024d 融合模型)
+│   ├── stage5_server/       # Flask 后端服务 (默认 Relation-SupCon 256d)
 │   └── stage6_android/      # Android 客户端：NCNN YOLO 裁眼 + HTTP 调用
 ├── configs/                 # 训练配置文件
 ├── scripts/                 # 工具脚本
@@ -104,8 +105,9 @@ PigeonVision/
 │   ├── eye_crops/           # YOLO眼部裁剪 + crop_meta.csv
 │   ├── iris_normalized/     # 64×512 三通道虹膜归一化图 + normalize_meta.csv
 │   └── features/
-│       ├── fusion_1024d_eval/  # 评估库：train gallery + val query 指标
-│       ├── fusion_1024d_full/  # 生产库：Flask 默认读取的全量检索库
+│       ├── relation_supcon_256d_eval/  # 评估库：train gallery + val query 指标
+│       ├── relation_supcon_256d/       # 生产库：Flask 默认读取的全量检索库
+│       ├── fusion_1024d_full/          # 旧三路融合生产库
 │       └── *.json              # 旧版评估指标
 └── ROADMAP.md               # 技术路线总文档
 ```
@@ -122,7 +124,7 @@ python src/stage4_siamese/build_db_fusion.py --mode eval
 python src/stage4_siamese/build_db_fusion.py --mode full
 ```
 
-`--mode eval` 默认输出 `outputs/features/fusion_1024d_eval/`，写入 `eval_metrics.json`、`eval_comparison.json`、`threshold.json` 和评估 gallery 的 FAISS 文件。`--mode full` 默认输出 `outputs/features/fusion_1024d_full/`，写入 Flask 直接读取的 `feature_db.npy`、`feature_db_meta.csv`、`faiss_index.bin`、`threshold.json`。
+默认 encoder 为 `relation_supcon`。`--mode eval` 默认输出 `outputs/features/relation_supcon_256d_eval/`，写入 `eval_metrics.json`、`eval_comparison.json`、`threshold.json` 和评估 gallery 的 FAISS 文件。`--mode full` 默认输出 `outputs/features/relation_supcon_256d/`，写入 Flask 直接读取的 `feature_db.npy`、`feature_db_meta.csv`、`faiss_index.bin`、`threshold.json`。
 
 检索指标口径：
 
@@ -180,10 +182,10 @@ curl -X POST http://localhost:8080/search \
 - **目标检测**: YOLOv5s (ultralytics)
 - **虹膜分割**: U-Net (PyTorch, GroupNorm)
 - **虹膜归一化**: Daugman 椭圆展开 + iris mask 过滤非虹膜采样点
-- **特征编码**: ResNet34/50 + Triplet/Relation-SupCon/ArcFace → Concat 1024d 融合
+- **特征编码**: ResNet34 + Relation-SupCon → 256d L2 归一化特征
 - **向量检索**: FAISS IndexFlatL2
 - **后端服务**: Flask
-- **检索效果**: 当前 Hit@1 64.3%, Hit@10 85.7%, Compare AUC 98.0%
+- **检索效果**: 当前 Hit@1 70.9%, Hit@10 87.8%, mAP 60.7%, Compare AUC 99.5%
 
 ## 许可证
 
