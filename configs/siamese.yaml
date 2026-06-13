@@ -28,19 +28,13 @@ batches_per_epoch: 0
 compare_eval_pairs: 200000
 pairs: data/pairs_train.csv
 
-# Fusion mode (Concat 1024d)
+# Single encoder (Relation-SupCon 256d)
 fusion:
   enabled: true
-  total_dim: 1024
+  total_dim: 256
   encoders:
-    - checkpoint: checkpoints/siamese/best.pt
+    - checkpoint: checkpoints/siamese/relation_supcon/best.pt
       feat_dim: 256
       backbone: resnet34
-    - checkpoint: checkpoints/siamese/supcon/best.pt
-      feat_dim: 256
-      backbone: resnet34
-    - checkpoint: checkpoints/siamese/arcface_v2/best.pt
-      feat_dim: 512
-      backbone: resnet50
-  faiss_index: outputs/features/fusion_1024d_full/faiss_index.bin
-  feature_meta: outputs/features/fusion_1024d_full/feature_db_meta.csv
+  faiss_index: outputs/features/relation_supcon_256d/faiss_index.bin
+  feature_meta: outputs/features/relation_supcon_256d/feature_db_meta.csv

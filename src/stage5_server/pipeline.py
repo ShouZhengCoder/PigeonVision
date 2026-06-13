@@ -57,15 +57,18 @@ def _configure_native_threads() -> None:
 _configure_native_threads()
 
 
-# Default fusion config: (checkpoint, feat_dim, backbone)
+# Default encoder: Relation-SupCon 256d (single encoder)
 FUSION_ENCODERS = [
-    (ROOT / "checkpoints" / "siamese" / "best.pt", 256, "resnet34"),
-    (ROOT / "checkpoints" / "siamese" / "supcon" / "best.pt", 256, "resnet34"),
-    (ROOT / "checkpoints" / "siamese" / "arcface_v2" / "best.pt", 512, "resnet50"),
+    (ROOT / "checkpoints" / "siamese" / "relation_supcon" / "best.pt", 256, "resnet34"),
 ]
-FUSION_DEFAULT_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full"
+FUSION_DEFAULT_DIR = ROOT / "outputs" / "features" / "relation_supcon_256d"
+FUSION_PG_DEFAULT_DIR = ROOT / "outputs" / "features" / "relation_supcon_256d_pg"
 DEFAULT_SEARCH_TOP_K = 20
 MAX_SEARCH_TOP_K = 100
+PG_BOOST_ANCHORS = 3
+PG_BOOST_BETA = 0.4
+PG_BOOST_POOL_MULTIPLIER = 20
+PG_BOOST_MIN_POOL = 100
 
 
 class IrisPipeline:
@@ -119,8 +122,14 @@ class IrisPipeline:
         self.segmenter = self._load_segmenter()
         self.index = self._load_faiss_index()
         self.meta = self._load_feature_meta()
+        self.pg_index = None
+        self.pg_meta = None
+        if self.fusion:
+            self.pg_index, self.pg_meta = self._load_optional_gallery(FUSION_PG_DEFAULT_DIR)
         self.img_index = self._load_img_index()
-        self._validate_index_meta()
+        self._validate_index_meta(self.index, self.meta, "image")
+        if self.pg_index is not None and self.pg_meta is not None:
+            self._validate_index_meta(self.pg_index, self.pg_meta, "pg")
 
         self.input_shape = tuple(int(v) for v in self.siamese_config.get("input_shape", NORMALIZED_SHAPE))
         if len(self.input_shape) != 2:
@@ -133,6 +142,10 @@ class IrisPipeline:
     @property
     def gallery_size(self) -> int:
         return int(self.index.ntotal)
+
+    @property
+    def pg_gallery_size(self) -> int:
+        return int(self.pg_index.ntotal) if self.pg_index is not None else 0
 
     @property
     def breed_count(self) -> int:
@@ -310,36 +323,119 @@ class IrisPipeline:
             "normalized_b": normalized_b,
         }
 
-    def search(self, img_bytes: bytes, top_k: int = DEFAULT_SEARCH_TOP_K, eye_crop: bool = False) -> dict[str, Any]:
+    def search(
+        self,
+        img_bytes: bytes,
+        top_k: int = DEFAULT_SEARCH_TOP_K,
+        eye_crop: bool = False,
+        mode: str = "pg",
+    ) -> dict[str, Any]:
         if top_k <= 0:
             raise ValueError("top_k 必须大于 0")
         top_k = min(int(top_k), MAX_SEARCH_TOP_K)
+        mode = str(mode or "pg").strip().lower()
+        if mode not in {"pg", "image", "pg_boost"}:
+            raise ValueError("mode 必须是 pg、pg_boost 或 image")
+        search_index = self.index
+        search_meta = self.meta
+        response_mode = "image"
+        if mode in {"pg", "pg_boost"}:
+            if self.pg_index is not None and self.pg_meta is not None:
+                search_index = self.pg_index
+                search_meta = self.pg_meta
+                response_mode = mode
+            else:
+                response_mode = "image"
         embedding, normalized_b64, eye_crop_b64, iris_region_b64 = self.encode(img_bytes, eye_crop=eye_crop)
         feature = embedding.reshape(1, -1).astype(np.float32)
-        k = min(int(top_k), int(self.index.ntotal))
-        distances, indices = self.index.search(feature, k)
+        if response_mode == "pg_boost":
+            distances, indices = self._search_pg_boost(feature, top_k)
+        else:
+            k = min(int(top_k), int(search_index.ntotal))
+            distances, indices = search_index.search(feature, k)
 
         results: list[dict[str, Any]] = []
         for rank, (distance, index_id) in enumerate(zip(distances[0], indices[0]), start=1):
             if index_id < 0:
                 continue
-            row = self.meta.iloc[int(index_id)]
+            row = search_meta.iloc[int(index_id)]
+            img_id = str(row.get("representative_img_id", row.get("img_id", "")))
             item = {
                 "rank": int(rank),
-                "img_id": str(row.get("img_id", "")),
+                "img_id": img_id,
+                "representative_img_id": img_id,
                 "blood_id": str(row.get("blood_id", "")),
                 "blood_name": str(row.get("blood_name", row.get("blood", ""))),
                 "distance": float(distance),
             }
             if "pg_id" in row.index:
                 item["pg_id"] = str(row.get("pg_id", ""))
+            if "member_count" in row.index:
+                try:
+                    item["member_count"] = int(float(str(row.get("member_count", "1") or "1")))
+                except ValueError:
+                    item["member_count"] = 1
             results.append(item)
         return {
+            "mode": response_mode,
             "results": results,
             "eye_crop": eye_crop_b64,
             "iris_region": iris_region_b64,
             "normalized": normalized_b64,
         }
+
+    def _search_pg_boost(self, feature: np.ndarray, top_k: int) -> tuple[np.ndarray, np.ndarray]:
+        if self.pg_index is None or self.pg_meta is None:
+            k = min(int(top_k), int(self.index.ntotal))
+            return self.index.search(feature, k)
+
+        anchor_k = min(PG_BOOST_ANCHORS, int(self.index.ntotal))
+        _anchor_distances, anchor_indices = self.index.search(feature, anchor_k)
+        pseudo_profile = self._pseudo_blood_profile(anchor_indices[0])
+
+        pool_k = min(max(int(top_k) * PG_BOOST_POOL_MULTIPLIER, PG_BOOST_MIN_POOL), int(self.pg_index.ntotal))
+        distances, indices = self.pg_index.search(feature, pool_k)
+        if not pseudo_profile:
+            return distances[:, :top_k], indices[:, :top_k]
+
+        rerank_scores = distances[0].astype(np.float32).copy()
+        for pos, index_id in enumerate(indices[0]):
+            if index_id < 0:
+                continue
+            row = self.pg_meta.iloc[int(index_id)]
+            blood_ids = self._split_pipe_ids(str(row.get("blood_id", "")))
+            if not blood_ids:
+                continue
+            shared_weight = sum(float(pseudo_profile.get(blood_id, 0.0)) for blood_id in blood_ids)
+            if shared_weight <= 0.0:
+                continue
+            denom = float(len(blood_ids))
+            rerank_scores[pos] -= float(PG_BOOST_BETA) * (shared_weight / max(denom, 1.0))
+        order = np.argsort(rerank_scores)[: int(top_k)]
+        return distances[:, order], indices[:, order]
+
+    def _pseudo_blood_profile(self, anchor_indices: np.ndarray) -> dict[str, float]:
+        profile: dict[str, float] = {}
+        for rank, index_id in enumerate(anchor_indices, start=1):
+            if index_id < 0:
+                continue
+            row = self.meta.iloc[int(index_id)]
+            blood_ids = self._split_pipe_ids(str(row.get("blood_id", "")))
+            if not blood_ids:
+                continue
+            weight = float(1.0 / np.log2(float(rank) + 1.0))
+            for blood_id in blood_ids:
+                profile[blood_id] = profile.get(blood_id, 0.0) + weight
+        if not profile:
+            return {}
+        max_weight = max(profile.values())
+        if max_weight <= 1e-12:
+            return {}
+        return {blood_id: float(weight / max_weight) for blood_id, weight in profile.items()}
+
+    @staticmethod
+    def _split_pipe_ids(value: str) -> set[str]:
+        return {part.strip() for part in str(value).split("|") if part.strip()}
 
     def gallery_image_path(self, img_id: str) -> Path | None:
         path = self.img_index.get(str(img_id))
@@ -376,12 +472,38 @@ class IrisPipeline:
         if not self.fusion:
             return [self._load_single_encoder(self.siamese_checkpoint)]
         encoders = []
-        for ckpt_path, feat_dim, backbone in FUSION_ENCODERS:
+        for ckpt_path, feat_dim, backbone in self._fusion_encoder_specs():
             resolved = self._resolve(ckpt_path)
             if not resolved.exists():
                 raise FileNotFoundError(f"缺少编码器权重：{resolved}")
             encoders.append(self._load_single_encoder(resolved, feat_dim, backbone))
         return encoders
+
+    def _fusion_encoder_specs(self) -> list[tuple[Path, int, str]]:
+        manifest_path = FUSION_DEFAULT_DIR / "build_manifest.json"
+        if not manifest_path.exists():
+            return FUSION_ENCODERS
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[warn] failed to read fusion manifest {manifest_path}: {exc}; using default encoders")
+            return FUSION_ENCODERS
+
+        encoder_rows = manifest.get("encoders")
+        if isinstance(encoder_rows, list) and encoder_rows:
+            specs: list[tuple[Path, int, str]] = []
+            for row in encoder_rows:
+                if not isinstance(row, dict):
+                    return FUSION_ENCODERS
+                try:
+                    checkpoint = self._resolve(str(row["checkpoint"]))
+                    feat_dim = int(row["feat_dim"])
+                    backbone = str(row["backbone"])
+                except (KeyError, TypeError, ValueError):
+                    return FUSION_ENCODERS
+                specs.append((checkpoint, feat_dim, backbone))
+            return specs
+        return FUSION_ENCODERS
 
     def _load_single_encoder(self, checkpoint_path: Path, feat_dim: int = 256, backbone: str = "resnet34") -> IrisEncoder:
         state = torch.load(checkpoint_path, map_location=self.device)
@@ -438,6 +560,20 @@ class IrisPipeline:
             raise ValueError(f"{self.feature_meta_path} 缺少列：{sorted(missing)}")
         return meta.reset_index(drop=True)
 
+    def _load_optional_gallery(self, gallery_dir: Path):
+        index_path = gallery_dir / "faiss_index.bin"
+        meta_path = gallery_dir / "feature_db_meta.csv"
+        if not index_path.exists() or not meta_path.exists():
+            print(f"[warn] PG_ID centroid gallery not found under {gallery_dir}; /search mode=pg falls back to image mode")
+            return None, None
+        index = faiss.read_index(str(index_path))
+        meta = pd.read_csv(meta_path, dtype=str).fillna("").reset_index(drop=True)
+        required = {"img_id", "blood_name", "pg_id"}
+        missing = required - set(meta.columns)
+        if missing:
+            raise ValueError(f"{meta_path} 缺少列：{sorted(missing)}")
+        return index, meta
+
     def _load_img_index(self) -> dict[str, Path]:
         if not self.img_index_path.exists():
             raise FileNotFoundError(f"缺少图片索引：{self.img_index_path}")
@@ -452,14 +588,14 @@ class IrisPipeline:
             if str(row.img_id) and str(row.path)
         }
 
-    def _validate_index_meta(self) -> None:
-        if int(self.index.ntotal) != len(self.meta):
+    def _validate_index_meta(self, index, meta: pd.DataFrame, name: str) -> None:
+        if int(index.ntotal) != len(meta):
             raise ValueError(
-                f"FAISS 索引数量与元数据行数不一致：index={self.index.ntotal}, meta={len(self.meta)}"
+                f"{name} FAISS 索引数量与元数据行数不一致：index={index.ntotal}, meta={len(meta)}"
             )
-        expected_dim = 1024 if self.fusion else int(self.siamese_config.get("feat_dim", 256))
-        if int(self.index.d) != expected_dim:
-            raise ValueError(f"FAISS 维度与配置不一致：index.d={self.index.d}, expected={expected_dim}")
+        expected_dim = sum(int(s[1]) for s in self._fusion_encoder_specs()) if self.fusion else int(self.siamese_config.get("feat_dim", 256))
+        if int(index.d) != expected_dim:
+            raise ValueError(f"{name} FAISS 维度与配置不一致：index.d={index.d}, expected={expected_dim}")
 
     def _normalized_bgr_to_tensor(self, normalized_bgr: np.ndarray) -> torch.Tensor:
         height, width = self.input_shape

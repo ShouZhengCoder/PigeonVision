@@ -36,12 +36,15 @@ from relation_metrics import (
 
 DEFAULT_EVAL_DIR = ROOT / "outputs" / "features" / "fusion_1024d_eval"
 DEFAULT_FULL_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full"
+DEFAULT_FULL_PG_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full_pg"
 IRIS_DIR = ROOT / "outputs" / "iris_normalized"
-FUSION_ENCODERS = (
-    ("triplet", ROOT / "checkpoints" / "siamese" / "best.pt", 256, "resnet34"),
-    ("supcon", ROOT / "checkpoints" / "siamese" / "supcon" / "best.pt", 256, "resnet34"),
-    ("arcface", ROOT / "checkpoints" / "siamese" / "arcface_v2" / "best.pt", 512, "resnet50"),
-)
+ENCODER_REGISTRY: dict[str, tuple[str, Path, int, str]] = {
+    "triplet":          ("triplet",          ROOT / "checkpoints" / "siamese" / "best.pt",               256, "resnet34"),
+    "supcon":           ("supcon",           ROOT / "checkpoints" / "siamese" / "supcon" / "best.pt",     256, "resnet34"),
+    "relation_supcon":  ("relation_supcon",  ROOT / "checkpoints" / "siamese" / "relation_supcon" / "best.pt", 256, "resnet34"),
+    "arcface":          ("arcface",          ROOT / "checkpoints" / "siamese" / "arcface_v2" / "best.pt", 512, "resnet50"),
+}
+DEFAULT_ENCODERS = "relation_supcon"
 SEARCH_PRINT_KEYS = (
     "hit_at_1",
     "hit_at_5",
@@ -79,34 +82,90 @@ class IrisDbDataset(Dataset):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build 1024d fusion feature DB.")
+    parser = argparse.ArgumentParser(description="Build feature DB with configurable encoders.")
+    parser.add_argument(
+        "--encoders",
+        default=DEFAULT_ENCODERS,
+        help=f"Comma-separated encoder names from {{{','.join(ENCODER_REGISTRY)}}}. Default: {DEFAULT_ENCODERS}.",
+    )
     parser.add_argument(
         "--mode",
-        choices=("eval", "full"),
+        choices=("eval", "full", "full_pg"),
         default="eval",
-        help="eval: train gallery + val queries; full: all successful normalized PNGs for Flask production search.",
+        help="eval: train gallery + val queries; full: image production gallery; full_pg: PG_ID centroid production gallery.",
     )
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--device", default=None)
     parser.add_argument("--output-dir", type=Path, default=None, help="Defaults to fusion_1024d_eval or fusion_1024d_full by mode.")
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="Optional checkpoint replacing the SupCon branch while keeping the 1024d fusion layout.",
+    )
+    parser.add_argument("--checkpoint-feat-dim", type=int, default=256)
+    parser.add_argument("--checkpoint-backbone", default="resnet34")
     parser.add_argument("--train-meta", type=Path, default=ROOT / "data" / "train_meta.csv")
     parser.add_argument("--val-meta", type=Path, default=ROOT / "data" / "val_meta.csv")
     parser.add_argument("--normalize-meta", type=Path, default=IRIS_DIR / "normalize_meta.csv")
     parser.add_argument("--pigeon-csv", type=Path, default=ROOT / "data" / "extracted" / "datasetXGN" / "pigeon.csv")
     parser.add_argument("--relations", type=Path, default=ROOT / "data" / "extracted" / "datasetXGN" / "relations.csv")
     parser.add_argument("--threshold-source", type=Path, default=None, help="Threshold JSON to copy in --mode full.")
+    parser.add_argument("--source-dir", type=Path, default=DEFAULT_FULL_DIR, help="Image-level DB source for --mode full_pg.")
     parser.add_argument("--limit", type=int, default=None, help="Use first N gallery/query rows for smoke tests.")
     parser.add_argument("--compare-max-pairs", type=int, default=200000)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
+def resolve_encoder_specs(encoder_names: list[str], checkpoint_override: Path | None, feat_dim: int, backbone: str) -> list[tuple[str, Path, int, str]]:
+    """Resolve encoder specs from registry. If checkpoint_override is given, it replaces the first supcon/relation_supcon entry."""
+    specs: list[tuple[str, Path, int, str]] = []
+    for name in encoder_names:
+        if name not in ENCODER_REGISTRY:
+            raise ValueError(f"Unknown encoder '{name}'. Available: {sorted(ENCODER_REGISTRY)}")
+        specs.append(ENCODER_REGISTRY[name])
+    if checkpoint_override is not None:
+        for i, (name, _, _, _) in enumerate(specs):
+            if name in ("supcon", "relation_supcon"):
+                specs[i] = ("relation_supcon", resolve_root_path(checkpoint_override), int(feat_dim), str(backbone))
+                break
+    return specs
+
+
+def encoder_description(specs: list[tuple[str, Path, int, str]]) -> str:
+    return " + ".join(f"{name}_{dim}d" for name, _path, dim, _backbone in specs)
+
+
+def auto_output_dir(specs: list[tuple[str, Path, int, str]], mode: str) -> Path:
+    """Generate output directory from encoder names and dimensions."""
+    desc = "_".join(f"{name}_{dim}d" for name, _path, dim, _backbone in specs)
+    if mode == "eval":
+        return ROOT / "outputs" / "features" / f"{desc}_eval"
+    elif mode == "full_pg":
+        return ROOT / "outputs" / "features" / f"{desc}_pg"
+    else:
+        return ROOT / "outputs" / "features" / desc
+
+
+def encoder_manifest(specs: list[tuple[str, Path, int, str]]) -> list[dict[str, object]]:
+    return [
+        {
+            "name": name,
+            "checkpoint": str(path),
+            "feat_dim": int(dim),
+            "backbone": backbone,
+        }
+        for name, path, dim, backbone in specs
+    ]
+
+
 def torch_load_checkpoint(path: Path, device: torch.device):
     try:
         return torch.load(path, map_location=device, weights_only=True)
-    except TypeError:
-        return torch.load(path, map_location=device)
+    except Exception:
+        return torch.load(path, map_location=device, weights_only=False)
 
 
 def load_encoder(checkpoint_path: Path, feat_dim: int, backbone: str, device: torch.device) -> IrisEncoder:
@@ -348,6 +407,119 @@ def compute_pg_id_centroids(
     return np.stack(centroid_features).astype("float32"), centroid_pg_ids, centroid_sets
 
 
+def _pipe_set(value: object) -> set[str]:
+    return {part.strip() for part in str(value).split("|") if part.strip()}
+
+
+def _majority_nonempty(values: list[str]) -> str:
+    counts: dict[str, int] = {}
+    for value in values:
+        value = str(value).strip()
+        if value:
+            counts[value] = counts.get(value, 0) + 1
+    if not counts:
+        return ""
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+
+def build_pg_centroid_db(features: np.ndarray, meta: pd.DataFrame) -> tuple[np.ndarray, pd.DataFrame, dict[str, int]]:
+    required = {"img_id", "pg_id"}
+    missing = required - set(meta.columns)
+    if missing:
+        raise ValueError(f"source feature metadata missing columns: {sorted(missing)}")
+    rows = meta.copy().fillna("")
+    rows["img_id"] = rows["img_id"].astype(str).str.strip()
+    rows["pg_id"] = rows["pg_id"].astype(str).str.strip()
+    if "blood_id" not in rows.columns:
+        rows["blood_id"] = ""
+    if "blood_name" not in rows.columns:
+        rows["blood_name"] = rows["blood"] if "blood" in rows.columns else ""
+    if "blood" not in rows.columns:
+        rows["blood"] = rows["blood_name"]
+    rows["blood_id"] = rows["blood_id"].astype(str)
+    rows["blood_name"] = rows["blood_name"].astype(str)
+    rows["blood"] = rows["blood"].astype(str)
+
+    norm_features = l2_normalize(features.astype("float32"))
+    out_features: list[np.ndarray] = []
+    out_rows: list[dict[str, object]] = []
+
+    with_pg = rows[rows["pg_id"] != ""]
+    for pg_id, group in with_pg.groupby("pg_id", sort=True):
+        indices = group.index.to_numpy(dtype=np.int64)
+        centroid = np.mean(norm_features[indices], axis=0, dtype=np.float32)
+        centroid = centroid / (np.linalg.norm(centroid) + 1e-12)
+        member_features = norm_features[indices]
+        nearest_local = int(np.argmin(np.linalg.norm(member_features - centroid[None, :], axis=1)))
+        representative_idx = int(indices[nearest_local])
+        blood_ids: set[str] = set()
+        for value in group["blood_id"].astype(str):
+            blood_ids.update(_pipe_set(value))
+        blood_name = _majority_nonempty(group["blood_name"].astype(str).tolist())
+        blood = _majority_nonempty(group["blood"].astype(str).tolist()) or blood_name
+        representative_img_id = str(rows.loc[representative_idx, "img_id"])
+        out_features.append(centroid.astype("float32"))
+        out_rows.append(
+            {
+                "img_id": representative_img_id,
+                "representative_img_id": representative_img_id,
+                "pg_id": str(pg_id),
+                "blood": blood,
+                "blood_id": "|".join(sorted(blood_ids)),
+                "blood_name": blood_name,
+                "member_count": int(len(group)),
+            }
+        )
+
+    no_pg = rows[rows["pg_id"] == ""]
+    for idx, row in no_pg.iterrows():
+        img_id = str(row["img_id"])
+        out_features.append(norm_features[int(idx)].astype("float32"))
+        out_rows.append(
+            {
+                "img_id": img_id,
+                "representative_img_id": img_id,
+                "pg_id": "",
+                "blood": str(row.get("blood", row.get("blood_name", ""))),
+                "blood_id": str(row.get("blood_id", "")),
+                "blood_name": str(row.get("blood_name", row.get("blood", ""))),
+                "member_count": 1,
+            }
+        )
+
+    if not out_features:
+        return np.empty((0, features.shape[1]), dtype="float32"), pd.DataFrame(), {"pg_rows": 0, "image_rows_no_pg": 0}
+    out_meta = pd.DataFrame(out_rows).sort_values(["pg_id", "img_id"]).reset_index(drop=True)
+    out_features_arr = np.stack(out_features).astype("float32")
+    if len(out_meta) == len(out_features_arr):
+        # Preserve feature/meta alignment after sorting.
+        order_keys = [
+            (str(row.get("pg_id", "")), str(row.get("img_id", "")), i)
+            for i, row in enumerate(out_rows)
+        ]
+        order = [item[2] for item in sorted(order_keys)]
+        out_features_arr = out_features_arr[order]
+    stats = {
+        "pg_rows": int((out_meta["pg_id"].astype(str).str.strip() != "").sum()),
+        "image_rows_no_pg": int((out_meta["pg_id"].astype(str).str.strip() == "").sum()),
+        "total_rows": int(len(out_meta)),
+    }
+    return l2_normalize(out_features_arr), out_meta, stats
+
+
+def save_precomputed_feature_db(features: np.ndarray, feature_meta: pd.DataFrame, output_dir: Path) -> int:
+    import faiss
+
+    if len(feature_meta) != len(features):
+        raise ValueError(f"feature/meta mismatch: features={len(features)}, meta={len(feature_meta)}")
+    np.save(output_dir / "feature_db.npy", features.astype("float32"))
+    feature_meta.fillna("").to_csv(output_dir / "feature_db_meta.csv", index=False)
+    index = faiss.IndexFlatL2(int(features.shape[1]))
+    index.add(features.astype("float32"))
+    faiss.write_index(index, str(output_dir / "faiss_index.bin"))
+    return int(index.ntotal)
+
+
 def copy_threshold_for_full(output_dir: Path, threshold_source: Path | None) -> Path:
     candidates: list[Path] = []
     if threshold_source is not None:
@@ -369,12 +541,12 @@ def write_json(path: Path, payload: dict) -> None:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
-def run_eval_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncoder, int]], transform, device: torch.device) -> int:
+def run_eval_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncoder, int]], transform, device: torch.device, spec_list: list, spec_desc: str, output_dir_override: Path | None) -> int:
     iris_dir = IRIS_DIR
     train_meta = resolve_root_path(args.train_meta)
     val_meta = resolve_root_path(args.val_meta)
     normalize_meta = resolve_root_path(args.normalize_meta)
-    output_dir = ensure_dir(resolve_root_path(args.output_dir or DEFAULT_EVAL_DIR))
+    output_dir = ensure_dir(output_dir_override or auto_output_dir(spec_list, "eval"))
     pigeon_csv = resolve_root_path(args.pigeon_csv)
     relations = resolve_root_path(args.relations)
 
@@ -470,7 +642,8 @@ def run_eval_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncode
         "mode": "eval",
         "gallery_role": "train",
         "query_role": "val",
-        "fusion": "triplet_256d + supcon_256d + arcface_512d",
+        "fusion": spec_desc,
+        "encoders": encoder_manifest(spec_list),
         "total_dim": total_dim,
         "gallery_size": ntotal,
         "query_size": int(len(query_rows)),
@@ -502,10 +675,10 @@ def run_eval_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncode
     return 0
 
 
-def run_full_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncoder, int]], transform, device: torch.device) -> int:
+def run_full_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncoder, int]], transform, device: torch.device, spec_list: list, spec_desc: str, output_dir_override: Path | None) -> int:
     iris_dir = IRIS_DIR
     normalize_meta = resolve_root_path(args.normalize_meta)
-    output_dir = ensure_dir(resolve_root_path(args.output_dir or DEFAULT_FULL_DIR))
+    output_dir = ensure_dir(output_dir_override or auto_output_dir(spec_list, "full"))
     pigeon_csv = resolve_root_path(args.pigeon_csv)
     relations = resolve_root_path(args.relations)
 
@@ -539,7 +712,8 @@ def run_full_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncode
         output_dir / "build_manifest.json",
         {
             "mode": "full",
-            "fusion": "triplet_256d + supcon_256d + arcface_512d",
+            "fusion": spec_desc,
+            "encoders": encoder_manifest(spec_list),
             "total_dim": total_dim,
             "gallery_size": ntotal,
             "metadata_stats": stats,
@@ -548,6 +722,42 @@ def run_full_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncode
     )
     print(f"Saved full production DB: gallery_size={ntotal}, dim={total_dim}")
     print(f"Threshold copied from: {threshold_from}")
+    print(f"Saved to {output_dir}/")
+    return 0
+
+
+def run_full_pg_mode(args: argparse.Namespace) -> int:
+    output_dir = ensure_dir(resolve_root_path(args.output_dir or DEFAULT_FULL_PG_DIR))
+    source_dir = resolve_root_path(args.source_dir)
+    feature_path = source_dir / "feature_db.npy"
+    meta_path = source_dir / "feature_db_meta.csv"
+    if not feature_path.exists() or not meta_path.exists():
+        raise FileNotFoundError(
+            f"Image-level source DB missing under {source_dir}. Run build_db_fusion.py --mode full first."
+        )
+    features = np.load(feature_path).astype("float32")
+    meta = pd.read_csv(meta_path, dtype=str).fillna("")
+    pg_features, pg_meta, stats = build_pg_centroid_db(features, meta)
+    if len(pg_features) == 0:
+        raise RuntimeError("No rows available for PG_ID centroid DB")
+    ntotal = save_precomputed_feature_db(pg_features, pg_meta, output_dir)
+    threshold_from = copy_threshold_for_full(output_dir, args.threshold_source or (source_dir / "threshold.json"))
+    write_json(
+        output_dir / "build_manifest.json",
+        {
+            "mode": "full_pg",
+            "source_dir": str(source_dir),
+            "total_dim": int(pg_features.shape[1]),
+            "gallery_size": int(ntotal),
+            "metadata_stats": stats,
+            "threshold_source": str(threshold_from),
+        },
+    )
+    print(
+        "Saved PG_ID centroid production DB: "
+        f"gallery_size={ntotal}, pg_rows={stats['pg_rows']}, no_pg_image_rows={stats['image_rows_no_pg']}, "
+        f"dim={pg_features.shape[1]}"
+    )
     print(f"Saved to {output_dir}/")
     return 0
 
@@ -576,19 +786,28 @@ def print_eval_summary(
 
 def main() -> int:
     args = parse_args()
-    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    if args.mode == "full_pg":
+        return run_full_pg_mode(args)
 
+    encoder_names = [n.strip() for n in str(args.encoders).split(",") if n.strip()]
+    spec_list = resolve_encoder_specs(encoder_names, args.checkpoint, int(args.checkpoint_feat_dim), str(args.checkpoint_backbone))
+    spec_desc = encoder_description(spec_list)
+
+    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    print(f"Encoders: {spec_desc}")
     print("Loading encoders...")
     encoders = [
         (name, load_encoder(path, dim, backbone, device), dim)
-        for name, path, dim, backbone in FUSION_ENCODERS
+        for name, path, dim, backbone in spec_list
     ]
+
+    output_dir_override = resolve_root_path(args.output_dir) if args.output_dir else None
 
     transform = default_transform(input_shape=(64, 512), mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), train=False)
     if args.mode == "eval":
-        return run_eval_mode(args, encoders, transform, device)
+        return run_eval_mode(args, encoders, transform, device, spec_list, spec_desc, output_dir_override)
     if args.mode == "full":
-        return run_full_mode(args, encoders, transform, device)
+        return run_full_mode(args, encoders, transform, device, spec_list, spec_desc, output_dir_override)
     raise ValueError(f"Unsupported mode: {args.mode}")
 
 
