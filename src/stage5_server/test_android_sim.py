@@ -1,7 +1,7 @@
 """
 模拟 Android 端调用的本地测试脚本。
 用法（在项目根目录执行）：
-    python src/stage5_server/test_android_sim.py [--mode pipeline|http] [--host 127.0.0.1:5000]
+    python src/stage5_server/test_android_sim.py [--mode pipeline|http] [--host 127.0.0.1:8080]
 """
 from __future__ import annotations
 
@@ -90,7 +90,9 @@ def test_http(eye_crop_path: Path, host: str) -> None:
         print(f"[http] /health OK: {health}")
     except Exception as e:
         print(f"[http] 连接失败：{e}")
-        print(f"  请先启动服务：python src/stage5_server/app.py --host 0.0.0.0 --port 5000")
+        print("  请先启动服务：")
+        print("    conda activate pigeonvision")
+        print("    python src/stage5_server/app.py --host 0.0.0.0 --port 8080")
         return
 
     img_bytes = eye_crop_path.read_bytes()
@@ -155,7 +157,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["pipeline", "http"], default="pipeline",
                         help="pipeline: 直接调用（无需启动服务）；http: 通过 HTTP 测试运行中的服务")
-    parser.add_argument("--host", default="127.0.0.1:5000", help="Flask 地址（仅 http 模式）")
+    parser.add_argument("--host", default="127.0.0.1:8080", help="Flask 地址（仅 http 模式）")
     parser.add_argument("--image", default=None, help="指定测试图片路径（默认自动选取）")
     args = parser.parse_args()
 

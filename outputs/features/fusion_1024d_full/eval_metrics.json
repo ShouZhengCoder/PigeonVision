@@ -1,17 +1,18 @@
 {
-  "fusion": "triplet_256d + supcon_256d + arcface_512d",
+  "mode": "server_optimized_summary",
+  "metric_source": "server Relation-SupCon full-library evaluation; see docs/performance_improvement_journey.md",
+  "fusion": "triplet_256d + relation_supcon_256d + arcface_512d",
   "total_dim": 1024,
+  "gallery_size": 25690,
   "search": {
-    "recall_at_1": 0.355285,
-    "recall_at_5": 0.520068,
-    "recall_at_10": 0.591012,
-    "mAP": 0.161928
+    "hit_at_1": 0.643,
+    "hit_at_5": 0.808,
+    "hit_at_10": 0.857,
+    "mAP": 0.504
   },
   "compare": {
-    "accuracy": 0.668805,
-    "balanced_accuracy": 0.668805,
-    "auc": 0.730761,
-    "eer": 0.34242,
-    "threshold": 2.348179
+    "balanced_accuracy": 0.932,
+    "auc": 0.98,
+    "threshold": 1.3097071694392783
   }
 }

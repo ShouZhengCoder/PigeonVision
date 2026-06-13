@@ -395,7 +395,7 @@ private fun ServerPanel(
           value = serverUrl,
           onValueChange = onServerUrlChange,
           label = { Text("服务器地址") },
-          placeholder = { Text("http://192.168.1.x:5000") },
+          placeholder = { Text("http://192.168.1.x:8080") },
           singleLine = true,
           modifier = Modifier.weight(1f),
         )

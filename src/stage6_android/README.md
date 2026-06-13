@@ -11,7 +11,8 @@ Android 端负责拍照或选图、用 NCNN YOLOv5s 检测并裁剪鸽眼，然�
 
 ```bash
 cd /path/to/PigeonVision
-python src/stage5_server/app.py --host 0.0.0.0 --port 5000
+conda activate pigeonvision
+python src/stage5_server/app.py --host 0.0.0.0 --port 8080
 ```
 
 - NCNN YOLO 模型文件存在：
@@ -40,7 +41,7 @@ app/build/outputs/apk/debug/app-debug.apk
 2. 真机演示时不要填 `localhost`，应填写电脑局域网 IP，例如：
 
 ```text
-http://192.168.1.23:5000
+http://192.168.1.23:8080
 ```
 
 3. 点击「连接测试」。成功时会显示图库规模。
@@ -136,7 +137,7 @@ multipart/form-data:
 
 ## 常见问题
 
-- 「连接失败」：确认服务端用 `--host 0.0.0.0` 启动，手机和电脑在同一网络，防火墙放行 5000 端口。
+- 「连接失败」：确认服务端用 `--host 0.0.0.0` 启动，手机和电脑在同一网络，防火墙放行 8080 端口。
 - 「未检测到眼部，请靠近拍摄」：拍摄时让鸽眼占画面更大，避免反光和模糊。
 - 检索结果无缩略图：确认服务端存在 `outputs/img_index.csv`，且本机能访问 CSV 中记录的原始图片路径。
 - Debug 构建能访问 HTTP 明文地址，正式发布如需 HTTPS 可再收紧网络配置。
