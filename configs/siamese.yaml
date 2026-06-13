@@ -36,7 +36,7 @@ fusion:
     - checkpoint: checkpoints/siamese/best.pt
       feat_dim: 256
       backbone: resnet34
-    - checkpoint: checkpoints/siamese/supcon/best.pt
+    - checkpoint: checkpoints/siamese/relation_supcon/best.pt
       feat_dim: 256
       backbone: resnet34
     - checkpoint: checkpoints/siamese/arcface_v2/best.pt

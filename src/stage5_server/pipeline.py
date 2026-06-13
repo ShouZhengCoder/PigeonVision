@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import pickle
 import sys
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,7 @@ _configure_native_threads()
 # Default fusion config: (checkpoint, feat_dim, backbone)
 FUSION_ENCODERS = [
     (ROOT / "checkpoints" / "siamese" / "best.pt", 256, "resnet34"),
-    (ROOT / "checkpoints" / "siamese" / "supcon" / "best.pt", 256, "resnet34"),
+    (ROOT / "checkpoints" / "siamese" / "relation_supcon" / "best.pt", 256, "resnet34"),
     (ROOT / "checkpoints" / "siamese" / "arcface_v2" / "best.pt", 512, "resnet50"),
 ]
 FUSION_DEFAULT_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full"
@@ -384,7 +385,7 @@ class IrisPipeline:
         return encoders
 
     def _load_single_encoder(self, checkpoint_path: Path, feat_dim: int = 256, backbone: str = "resnet34") -> IrisEncoder:
-        state = torch.load(checkpoint_path, map_location=self.device)
+        state = self._torch_load_checkpoint(checkpoint_path)
         checkpoint_config = state.get("config", {}) if isinstance(state, dict) else {}
         dim = int(checkpoint_config.get("feat_dim", feat_dim))
         arch = str(checkpoint_config.get("backbone", backbone))
@@ -393,6 +394,17 @@ class IrisPipeline:
         encoder.load_state_dict(model_state)
         encoder.eval()
         return encoder
+
+    def _torch_load_checkpoint(self, checkpoint_path: Path):
+        try:
+            return torch.load(checkpoint_path, map_location=self.device, weights_only=True)
+        except TypeError:
+            return torch.load(checkpoint_path, map_location=self.device)
+        except pickle.UnpicklingError:
+            # The local model files come from our own training/HF sync. Some
+            # relation checkpoints store pathlib values in their config, which
+            # PyTorch 2.6 blocks when weights_only=True.
+            return torch.load(checkpoint_path, map_location=self.device, weights_only=False)
 
     def _load_detector(self):
         from ultralytics import YOLO

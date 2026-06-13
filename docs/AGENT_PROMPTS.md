@@ -297,7 +297,7 @@ POST /compare：接收 multipart/form-data 的 image_a 和 image_b，返回 JSON
 POST /search：接收 multipart/form-data 的 image 和可选 top_k，返回 JSON。
 GET /：返回 templates/index.html。
 所有异常捕获后返回 HTTP 400 和中文错误信息，不能让服务崩溃。
-支持命令行参数 --host（默认0.0.0.0）、--port（默认5000）、--threshold（默认1.0）。
+支持命令行参数 --host（默认0.0.0.0）、--port（默认8080）、--threshold（默认1.0）。
 
 【文件三】src/stage5_server/threshold.py
 加载 IrisPipeline。

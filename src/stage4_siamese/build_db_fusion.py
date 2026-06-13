@@ -4,13 +4,14 @@ Modes:
 - eval: train images are the gallery, val images are the query set.
 - full: all successful normalized iris PNGs are the production gallery.
 
-Triplet 256d + SupCon 256d + ArcFace 512d -> per-part L2 norm -> concat
--> global L2 norm -> 1024d.
+Triplet 256d + Relation-SupCon 256d + ArcFace 512d -> per-part L2 norm
+-> concat -> global L2 norm -> 1024d.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import pickle
 import shutil
 from pathlib import Path
 
@@ -39,9 +40,10 @@ DEFAULT_FULL_DIR = ROOT / "outputs" / "features" / "fusion_1024d_full"
 IRIS_DIR = ROOT / "outputs" / "iris_normalized"
 FUSION_ENCODERS = (
     ("triplet", ROOT / "checkpoints" / "siamese" / "best.pt", 256, "resnet34"),
-    ("supcon", ROOT / "checkpoints" / "siamese" / "supcon" / "best.pt", 256, "resnet34"),
+    ("relation_supcon", ROOT / "checkpoints" / "siamese" / "relation_supcon" / "best.pt", 256, "resnet34"),
     ("arcface", ROOT / "checkpoints" / "siamese" / "arcface_v2" / "best.pt", 512, "resnet50"),
 )
+FUSION_DESCRIPTION = "triplet_256d + relation_supcon_256d + arcface_512d"
 SEARCH_PRINT_KEYS = (
     "hit_at_1",
     "hit_at_5",
@@ -107,6 +109,11 @@ def torch_load_checkpoint(path: Path, device: torch.device):
         return torch.load(path, map_location=device, weights_only=True)
     except TypeError:
         return torch.load(path, map_location=device)
+    except pickle.UnpicklingError:
+        # Project checkpoints are produced by our own training jobs and may
+        # include config values such as pathlib.PosixPath, which PyTorch 2.6
+        # rejects under the new weights_only=True default.
+        return torch.load(path, map_location=device, weights_only=False)
 
 
 def load_encoder(checkpoint_path: Path, feat_dim: int, backbone: str, device: torch.device) -> IrisEncoder:
@@ -470,7 +477,7 @@ def run_eval_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncode
         "mode": "eval",
         "gallery_role": "train",
         "query_role": "val",
-        "fusion": "triplet_256d + supcon_256d + arcface_512d",
+        "fusion": FUSION_DESCRIPTION,
         "total_dim": total_dim,
         "gallery_size": ntotal,
         "query_size": int(len(query_rows)),
@@ -539,7 +546,16 @@ def run_full_mode(args: argparse.Namespace, encoders: list[tuple[str, IrisEncode
         output_dir / "build_manifest.json",
         {
             "mode": "full",
-            "fusion": "triplet_256d + supcon_256d + arcface_512d",
+            "fusion": FUSION_DESCRIPTION,
+            "encoders": [
+                {
+                    "name": name,
+                    "checkpoint": str(path),
+                    "feat_dim": int(dim),
+                    "backbone": backbone,
+                }
+                for name, path, dim, backbone in FUSION_ENCODERS
+            ],
             "total_dim": total_dim,
             "gallery_size": ntotal,
             "metadata_stats": stats,

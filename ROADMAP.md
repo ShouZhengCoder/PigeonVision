@@ -28,13 +28,13 @@
   └─[Stage 2: YOLOv5]─→ 眼部 bbox 裁剪 (25,766 张)
        └─[Stage 3: U-Net分割 + Daugman 椭圆展开 + iris mask过滤]─→ 64×512 三通道虹膜纹理图 (25,690 张)
             └─[Stage 4: IrisEncoder]─→ 256/512-dim L2归一化特征向量
-                 ├─[Stage 5: /compare]─→ 欧氏距离 + 阈值判断 (AUC 73.1%)
-                 └─[Stage 5: /search]─→ FAISS IndexFlatL2 Top-K (历史 Hit@1 35.5%, Hit@10 59.1%)
+                 ├─[Stage 5: /compare]─→ 欧氏距离 + 阈值判断 (当前 AUC 98.0%)
+                 └─[Stage 5: /search]─→ FAISS IndexFlatL2 Top-K (当前 Hit@1 64.3%, Hit@10 85.7%)
 
 模型配置：
   Concat 1024d 融合模型 (最佳):
     ├── Triplet Encoder: ResNet34, 256-dim (PK sampler, batch_hard_triplet_loss)
-    ├── SupCon Encoder: ResNet34, 256-dim (SupCon Loss, τ=0.07)
+    ├── Relation-SupCon Encoder: ResNet34, 256-dim (关系感知加权 SupCon Loss)
     └── ArcFace Encoder: ResNet50, 512-dim (ArcFace + CrossEntropy, s=30, m=0.5)
   
   FAISS:
@@ -434,9 +434,10 @@ min_db_images_per_blood: 20
 | 5 | Multi-Positive Triplet | 嵌入弥散，不如原始 | ❌ |
 | 6 | Proxy-Anchor Loss | 未收敛 | ❌ |
 | 7 | ArcFace Loss | 7a (BCE) 不收敛，7b (单标签) 未运行 | ⚠️ |
-| **8** | **MoE Concat 512d** | **全面最优**：R@1 25.9%, R@10 51.8%, AUC 71.0% | ✅ |
+| **8** | **MoE Concat 512d** | R@1 25.9%, R@10 51.8%, AUC 71.0% | ✅ |
+| **9** | **Relation-SupCon + 全量融合库** | **当前最优**：Hit@1 64.3%, Hit@10 85.7%, AUC 98.0% | ✅ |
 
-**最佳模型**：Concat 512d（Triplet 256d + SupCon 256d 拼接），无需重训，直接拼接两个互补模型。
+**最佳模型**：Concat 1024d（Triplet 256d + Relation-SupCon 256d + ArcFace 512d 拼接），Flask 生产检索默认使用该融合特征库。历史 `Triplet + SupCon + ArcFace` 方案保留为对照基线。
 
 详细实验记录见 `docs/experiments.md`。
 
@@ -451,6 +452,7 @@ min_db_images_per_blood: 20
 | `src/stage4_siamese/loss_proxy_anchor.py` | Proxy-Anchor Loss |
 | `src/stage4_siamese/train.py` | 训练主脚本 (Triplet) |
 | `src/stage4_siamese/train_multilabel.py` | SupCon 训练脚本 |
+| `src/stage4_siamese/train_relation_supcon.py` | 关系感知加权 SupCon 训练脚本 |
 | `src/stage4_siamese/train_arcface.py` | ArcFace 训练脚本 |
 | `src/stage4_siamese/train_proxy_anchor.py` | Proxy-Anchor 训练脚本 |
 | `src/stage4_siamese/build_db.py` | 构建 FAISS 特征数据库 + 双标准评估 |
@@ -458,6 +460,7 @@ min_db_images_per_blood: 20
 | `src/stage4_siamese/relation_metrics.py` | 多标签 blood_id 评估指标 |
 | `checkpoints/siamese/best.pt` | 最优 Triplet 编码器权重 |
 | `checkpoints/siamese/supcon/best.pt` | 最优 SupCon 编码器权重 |
+| `checkpoints/siamese/relation_supcon/best.pt` | 当前生产 Relation-SupCon 编码器权重 |
 | `outputs/features/fusion_1024d_eval/feature_db.npy` | 评估 gallery 特征矩阵（train only） |
 | `outputs/features/fusion_1024d_eval/eval_metrics.json` | val query 对 train gallery 的评估指标 |
 | `outputs/features/fusion_1024d_eval/threshold.json` | 评估集上得到的 Compare 阈值 |
@@ -471,7 +474,7 @@ min_db_images_per_blood: 20
 - `--mode eval`：读取 `data/train_meta.csv` 作为 gallery，读取 `data/val_meta.csv` 作为 query；两者都必须落在 `normalize_meta.csv status=success` 且 PNG 存在集合内；输出到 `outputs/features/fusion_1024d_eval/`；**不得把 val/query 混入评估 gallery**。
 - `--mode full`：读取 `outputs/iris_normalized/normalize_meta.csv` 中全部 `status=success` 的 img_id，并确认 `outputs/iris_normalized/<img_id>.png` 存在；关联 `pigeon.csv` 的 `PG_ID/BLOOD` 和 `relations.csv` 的 blood_id；输出到 `outputs/features/fusion_1024d_full/`，供 Flask 默认读取。
 - 两种模式都保存 `feature_db.npy`、`feature_db_meta.csv` 和 `faiss_index.bin`；eval 额外保存 `eval_metrics.json` / `eval_comparison.json` / `threshold.json`；full 复制 eval 阈值并保存 `build_manifest.json`。
-- Concat 1024d 特征拼接后会再做整体 L2 归一化，保证离线 gallery 与 Flask 在线 query 尺度一致。
+- Concat 1024d 特征拼接后会再做整体 L2 归一化，保证离线 gallery 与 Flask 在线 query 尺度一致；当前默认 encoder 顺序为 `triplet_256d + relation_supcon_256d + arcface_512d`。
 
 命令：
 
@@ -575,7 +578,7 @@ def process_image(img_bytes):
 ### 验收标准
 - 两个接口均能返回正确 JSON
 - Web 页面能上传图片并展示结果
-- 服务绑定 127.0.0.1:5000
+- 服务绑定 127.0.0.1:8080
 - `/health` 的 `gallery_size` 接近当前全量成功归一化数量（约 25,690），而不是 train-only 评估 gallery
 
 ---

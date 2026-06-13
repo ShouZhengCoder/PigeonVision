@@ -45,10 +45,11 @@ python src/stage4_siamese/build_db_fusion.py --mode full
 ```
 
 ```bash
-python src/stage5_server/app.py --host 0.0.0.0 --port 5000
+conda activate pigeonvision
+python src/stage5_server/app.py --host 0.0.0.0 --port 8080
 ```
 
-访问 http://localhost:5000 使用 Web 界面。Android 真机需要和服务端在同一局域网内，并在 App 顶部填写电脑的局域网地址，例如 `http://192.168.1.23:5000`。
+访问 http://localhost:8080 使用 Web 界面。Android 真机需要和服务端在同一局域网内，并在 App 顶部填写电脑的局域网地址，例如 `http://192.168.1.23:8080`。
 
 ### 5. 运行 Android 客户端
 
@@ -74,13 +75,11 @@ App 支持两种任务：
 
 | 任务 | 指标 | 值 |
 |------|------|:--:|
-| Search | Hit@1 | **35.5%** |
-| | Hit@10 | **59.1%** |
-| | mAP | 16.2% |
-| Compare | AUC | **73.1%** |
-| | BalAcc | 66.9% |
+| Search | Hit@1 | **64.3%** |
+| | Hit@10 | **85.7%** |
+| Compare | AUC | **98.0%** |
 
-> 以上为 `fusion_1024d_eval` 评估口径的历史结果：train 作为 gallery，val 作为 query，多标签 blood_id 重合评估。生产检索库为 `fusion_1024d_full`，使用 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的虹膜图，当前全量应接近 25,690 张。详细实验记录见 [docs/experiments.md](docs/experiments.md)。
+> 当前服务器优化版采用 `triplet_256d + relation_supcon_256d + arcface_512d` 融合特征，生产检索库 `fusion_1024d_full` 使用 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的虹膜图，当前全量约 25,690 张。历史 `triplet + supcon + arcface` 方案为 Hit@1 35.5%、Hit@10 59.1%、Compare AUC 73.1%。详细实验记录见 [docs/experiments.md](docs/experiments.md) 和 [docs/performance_improvement_journey.md](docs/performance_improvement_journey.md)。
 
 ## 项目结构
 
@@ -151,7 +150,7 @@ Git 只同步源码、配置、文档和小型元数据 CSV；原始图片、眼
 ### POST /compare
 
 ```bash
-curl -X POST http://localhost:5000/compare \
+curl -X POST http://localhost:8080/compare \
   -F "image_a=@iris1.png" \
   -F "image_b=@iris2.png" \
   -F "eye_crop=1"
@@ -162,7 +161,7 @@ curl -X POST http://localhost:5000/compare \
 ### POST /search
 
 ```bash
-curl -X POST http://localhost:5000/search \
+curl -X POST http://localhost:8080/search \
   -F "image=@iris.png" \
   -F "top_k=20" \
   -F "eye_crop=1"
@@ -181,10 +180,10 @@ curl -X POST http://localhost:5000/search \
 - **目标检测**: YOLOv5s (ultralytics)
 - **虹膜分割**: U-Net (PyTorch, GroupNorm)
 - **虹膜归一化**: Daugman 椭圆展开 + iris mask 过滤非虹膜采样点
-- **特征编码**: ResNet34/50 + Triplet/SupCon/ArcFace → Concat 1024d 融合
+- **特征编码**: ResNet34/50 + Triplet/Relation-SupCon/ArcFace → Concat 1024d 融合
 - **向量检索**: FAISS IndexFlatL2
 - **后端服务**: Flask
-- **检索效果**: 历史 Hit@1 35.5%, Hit@10 59.1%, Compare AUC 73.1%
+- **检索效果**: 当前 Hit@1 64.3%, Hit@10 85.7%, Compare AUC 98.0%
 
 ## 许可证
 

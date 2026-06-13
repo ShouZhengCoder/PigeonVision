@@ -76,7 +76,7 @@ class ApiClientTest {
 
   @Test
   fun resolveUrl_acceptsRelativeAndAbsoluteUrls() {
-    assertEquals("http://192.168.1.2:5000/image/100009", ApiClient.resolveUrl("192.168.1.2:5000/", "/image/100009"))
+    assertEquals("http://192.168.1.2:8080/image/100009", ApiClient.resolveUrl("192.168.1.2:8080/", "/image/100009"))
     assertEquals("https://example.com/image/1", ApiClient.resolveUrl("http://server", "https://example.com/image/1"))
   }
 

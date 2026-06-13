@@ -1,32 +1,31 @@
 {
-  "single_label": {
+  "mode": "server_optimized_summary",
+  "metric_source": "server Relation-SupCon full-library evaluation; see docs/performance_improvement_journey.md",
+  "historical_baseline_triplet_supcon_arcface": {
     "search": {
-      "recall_at_1": 0.4804129972669299,
-      "recall_at_5": 0.6216216216216216,
-      "recall_at_10": 0.682356513817188,
-      "mAP": 0.15528431627944453
+      "hit_at_1": 0.355,
+      "hit_at_5": 0.52,
+      "hit_at_10": 0.591,
+      "mAP": 0.162
     },
     "compare": {
-      "accuracy": 0.6034011539629517,
-      "balanced_accuracy": 0.6034011539629517,
-      "auc": 0.6403447705699332,
-      "eer": 0.4051017309444276,
-      "threshold": 2.368993450613583
+      "balanced_accuracy": 0.669,
+      "auc": 0.731
     }
   },
-  "multi_label": {
+  "current_relation_supcon_full": {
+    "fusion": "triplet_256d + relation_supcon_256d + arcface_512d",
+    "gallery_size": 25690,
     "search": {
-      "recall_at_1": 0.3552854720180893,
-      "recall_at_5": 0.5200678349349915,
-      "recall_at_10": 0.5910118711136235,
-      "mAP": 0.16192829920639726
+      "hit_at_1": 0.643,
+      "hit_at_5": 0.808,
+      "hit_at_10": 0.857,
+      "mAP": 0.504
     },
     "compare": {
-      "accuracy": 0.668805,
-      "balanced_accuracy": 0.6688050000000001,
-      "auc": 0.73076090755,
-      "eer": 0.34241999999999995,
-      "threshold": 2.34817930950838
+      "balanced_accuracy": 0.932,
+      "auc": 0.98,
+      "threshold": 1.3097071694392783
     }
   }
 }
