@@ -26,6 +26,7 @@ from dataset import (
     default_transform,
     load_multi_label_meta,
     load_triplet_meta,
+    split_meta_for_training,
 )
 from loss import batch_hard_triplet_loss, batch_hard_triplet_loss_multi
 from model import IrisEncoder
@@ -41,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default=None)
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoints/siamese/last.pt.")
     parser.add_argument("--limit-train", type=int, default=None, help="Use first N train rows for smoke tests.")
-    parser.add_argument("--limit-val", type=int, default=None, help="Use first N val rows for smoke tests.")
+    parser.add_argument("--val-ratio", type=float, default=0.1, help="Internal validation split ratio (default: 0.1).")
     parser.add_argument("--no-pretrained", action="store_true", help="Disable ImageNet weights.")
     parser.add_argument("--patience", type=int, default=10, help="Early stopping patience on search_recall_at_1.")
     parser.add_argument("--smoke-min-recall", type=float, default=0.02, help="Smoke threshold for probe_recall_at_1.")
@@ -411,22 +412,30 @@ def main() -> int:
     seed = int(config.get("seed", 42))
 
     train_meta = resolve_root_path(config.get("train_meta", ROOT / "data" / "train_meta.csv"))
-    val_meta = resolve_root_path(config.get("val_meta", ROOT / "data" / "val_meta.csv"))
+    val_meta_path = resolve_root_path(config.get("val_meta", ROOT / "data" / "val_meta.csv"))
     iris_dir = resolve_root_path(config["iris_dir"])
 
-    train_rows = load_triplet_meta(train_meta)
-    val_rows = load_triplet_meta(val_meta)
-    train_rows = maybe_limit_df(train_rows, args.limit_train)
-    val_rows = maybe_limit_df(val_rows, args.limit_val)
+    train_rows_raw = load_triplet_meta(train_meta)
+    if val_meta_path.exists():
+        val_rows_raw = load_triplet_meta(val_meta_path)
+        all_rows = pd.concat([train_rows_raw, val_rows_raw], ignore_index=True)
+        logger.info("merged train_meta (%s) + val_meta (%s) = %s rows", len(train_rows_raw), len(val_rows_raw), len(all_rows))
+    else:
+        all_rows = train_rows_raw
+    all_rows = maybe_limit_df(all_rows, args.limit_train)
+    train_rows, val_rows = split_meta_for_training(all_rows, val_ratio=args.val_ratio, seed=seed, group_col="blood_id")
     blood_id_to_label, blood_name_to_label = build_triplet_label_maps(train_rows, val_rows)
     train_rows = add_triplet_label_columns(train_rows, blood_id_to_label, blood_name_to_label)
     val_rows = add_triplet_label_columns(val_rows, blood_id_to_label, blood_name_to_label)
 
     # Load multi-label blood_id info (for multi-positive triplet)
     multi_train_meta = resolve_root_path(ROOT / "data" / "train_multi_meta.csv")
+    multi_val_meta = resolve_root_path(ROOT / "data" / "val_multi_meta.csv")
     multi_label_map: dict[str, set[int]] = {}
     if multi_train_meta.exists():
         multi_label_map = load_multi_label_meta(multi_train_meta)
+        if multi_val_meta.exists():
+            multi_label_map.update(load_multi_label_meta(multi_val_meta))
         logger.info("loaded multi-label map: %s images", len(multi_label_map))
     else:
         logger.warning("multi_label_meta not found, falling back to single-label triplet")

@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from _common import ROOT, ensure_dir, resolve_root_path
-from dataset import default_transform, load_rgb_image
+from dataset import default_transform, load_rgb_image, split_meta_for_training
 from model import IrisEncoder
 from relation_metrics import load_blood_id_sets, compute_cross_search_metrics_by_blood_ids
 
@@ -115,9 +115,21 @@ def main():
     writer = SummaryWriter(log_dir=str(ROOT/"logs"/"tensorboard"/"pk_supcon_v2"))
 
     iris_dir = ROOT / "outputs" / "iris_normalized"
-    tr_ds = PKDS(ROOT/"data"/"train_multi_meta.csv", iris_dir,
+    # Merge train + val multi_meta, split internally for validation monitoring
+    all_df = pd.concat([
+        pd.read_csv(ROOT/"data"/"train_multi_meta.csv", dtype={"img_id": str, "blood_name": str}),
+        pd.read_csv(ROOT/"data"/"val_multi_meta.csv", dtype={"img_id": str, "blood_name": str}),
+    ], ignore_index=True)
+    tr_rows, val_rows = split_meta_for_training(all_df, val_ratio=0.1, seed=42, group_col="blood_name")
+    ckpt_dir = ensure_dir(ROOT/"checkpoints"/"siamese"/"pk_supcon_v2")
+    tr_meta_path = ckpt_dir / "_train_multi_meta.csv"
+    val_meta_path = ckpt_dir / "_val_multi_meta.csv"
+    tr_rows.to_csv(tr_meta_path, index=False)
+    val_rows.to_csv(val_meta_path, index=False)
+
+    tr_ds = PKDS(tr_meta_path, iris_dir,
                  transform=default_transform(input_shape=(64,512), train=True))
-    val_ds = PKDS(ROOT/"data"/"val_multi_meta.csv", iris_dir,
+    val_ds = PKDS(val_meta_path, iris_dir,
                   transform=default_transform(input_shape=(64,512), train=False))
     blood_id_sets = load_blood_id_sets(ROOT/"data"/"extracted"/"datasetXGN"/"relations.csv")
 
@@ -126,8 +138,6 @@ def main():
     gal_n = min(5000, len(tr_ds))
     gal_idx = sorted(rng.choice(len(tr_ds), gal_n, replace=False).tolist())
     val_idx = list(range(len(val_ds)))
-
-    ckpt_dir = ensure_dir(ROOT/"checkpoints"/"siamese"/"pk_supcon_v2")
 
     encoder = IrisEncoder(feat_dim=256, backbone="resnet34", pretrained=True, in_channels=3).to(device)
     proj = Proj(i=256, h=128, o=128).to(device)

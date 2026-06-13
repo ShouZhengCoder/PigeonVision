@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from _common import ROOT, ensure_dir, resolve_root_path
-from dataset import default_transform, load_rgb_image
+from dataset import default_transform, load_rgb_image, split_meta_for_training
 from model import IrisEncoder
 from relation_metrics import load_blood_id_sets, compute_cross_search_metrics_by_blood_ids
 
@@ -170,7 +170,19 @@ def main():
 
     iris_dir = ROOT / "outputs" / "iris_normalized"
     train_meta = ROOT / "data" / "train_meta.csv"
-    val_meta = ROOT / "data" / "val_meta.csv"
+    val_meta_path = ROOT / "data" / "val_meta.csv"
+
+    # Merge train + val meta, split internally for validation monitoring
+    all_rows = pd.concat([
+        pd.read_csv(train_meta, dtype={"img_id": str, "blood_name": str}),
+        pd.read_csv(val_meta_path, dtype={"img_id": str, "blood_name": str}),
+    ], ignore_index=True)
+    tr_rows, val_rows = split_meta_for_training(all_rows, val_ratio=0.1, seed=42, group_col="blood_id")
+    ckpt_dir = ensure_dir(ROOT / "checkpoints" / "siamese" / "arcface_v2")
+    train_meta = ckpt_dir / "_train_meta.csv"
+    val_meta = ckpt_dir / "_val_meta.csv"
+    tr_rows.to_csv(train_meta, index=False)
+    val_rows.to_csv(val_meta, index=False)
 
     name_to_label, num_classes = build_single_label_map(train_meta, val_meta)
 
@@ -194,7 +206,6 @@ def main():
         {"params": arcface.parameters(), "lr": args.lr_head},
     ])
 
-    ckpt_dir = ensure_dir(ROOT / "checkpoints" / "siamese" / "arcface_v2")
     best_map, best_ep, no_imp = -1.0, 0, 0
 
     logger.info("=== ArcFace V2 Single-Label Training ===")

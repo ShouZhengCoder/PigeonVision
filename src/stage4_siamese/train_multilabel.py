@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from _common import ROOT, ensure_dir, resolve_root_path
-from dataset import default_transform
+from dataset import default_transform, split_meta_for_training
 from dataset_multilabel import MultiLabelIrisDataset, collate_multilabel
 from loss_supcon import supcon_loss, supcon_loss_with_weights
 from model import IrisEncoder
@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", type=Path, default=ROOT / "configs" / "siamese.yaml")
     p.add_argument("--train-meta", type=Path, default=ROOT / "data" / "train_multi_meta.csv")
     p.add_argument("--val-meta", type=Path, default=ROOT / "data" / "val_multi_meta.csv")
+    p.add_argument("--val-ratio", type=float, default=0.1, help="Internal validation split ratio (default: 0.1).")
     p.add_argument("--blood-id-map", type=Path, default=ROOT / "data" / "blood_id_map.json")
     p.add_argument("--relations", type=Path, default=ROOT / "data" / "extracted" / "datasetXGN" / "relations.csv")
     p.add_argument("--epochs", type=int, default=None)
@@ -142,10 +143,29 @@ def main():
     writer = SummaryWriter(log_dir=str(ROOT / "logs" / "tensorboard" / "supcon"))
 
     iris_dir = resolve_root_path(config["iris_dir"])
-    tr_ds = MultiLabelIrisDataset(resolve_root_path(args.train_meta), resolve_root_path(args.blood_id_map), iris_dir,
+    train_meta_path = resolve_root_path(args.train_meta)
+    val_meta_path = resolve_root_path(args.val_meta)
+    blood_id_map_path = resolve_root_path(args.blood_id_map)
+
+    # Merge train + val meta, then split internally for monitoring
+    train_df = pd.read_csv(train_meta_path, dtype={"img_id": str, "blood_name": str})
+    if val_meta_path.exists():
+        val_df_raw = pd.read_csv(val_meta_path, dtype={"img_id": str, "blood_name": str})
+        all_df = pd.concat([train_df, val_df_raw], ignore_index=True)
+        logger.info("merged train_multi_meta (%s) + val_multi_meta (%s) = %s rows",
+                    len(train_df), len(val_df_raw), len(all_df))
+    else:
+        all_df = train_df
+    tr_rows, val_rows = split_meta_for_training(all_df, val_ratio=args.val_ratio, seed=seed, group_col="blood_name")
+    tr_meta_path = ckpt_dir / "_train_multi_meta.csv"
+    val_meta_path = ckpt_dir / "_val_multi_meta.csv"
+    tr_rows.to_csv(tr_meta_path, index=False)
+    val_rows.to_csv(val_meta_path, index=False)
+
+    tr_ds = MultiLabelIrisDataset(tr_meta_path, blood_id_map_path, iris_dir,
                                   transform=default_transform(input_shape=config["input_shape"], train=True,
                                    mean=config.get("normalize_mean", [0.5]*3), std=config.get("normalize_std", [0.5]*3)))
-    val_ds = MultiLabelIrisDataset(resolve_root_path(args.val_meta), resolve_root_path(args.blood_id_map), iris_dir,
+    val_ds = MultiLabelIrisDataset(val_meta_path, blood_id_map_path, iris_dir,
                                    transform=default_transform(input_shape=config["input_shape"], train=False,
                                     mean=config.get("normalize_mean", [0.5]*3), std=config.get("normalize_std", [0.5]*3)))
     val_indices = list(range(len(val_ds)))

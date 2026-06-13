@@ -395,3 +395,38 @@ class PairDataset(Dataset):
             img_b=self._load_image(img_id_b),
             label=torch.tensor(label, dtype=torch.float32),
         )
+
+
+def split_meta_for_training(
+    df: pd.DataFrame,
+    val_ratio: float = 0.1,
+    seed: int = 42,
+    group_col: str = "blood_id",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Stratified split for internal train/val during training.
+
+    Each group keeps at least 1 sample in train; val gets up to val_ratio
+    proportion per group. Returns (train_df, val_df).
+    """
+    rng = np.random.default_rng(int(seed))
+    train_parts: list[pd.DataFrame] = []
+    val_parts: list[pd.DataFrame] = []
+    for _group_id, group in df.groupby(group_col, sort=True):
+        indices = group.index.to_numpy()
+        if len(indices) < 2:
+            train_parts.append(group)
+            continue
+        rng.shuffle(indices)
+        val_count = max(1, int(round(len(indices) * float(val_ratio))))
+        if len(indices) - val_count < 1:
+            val_count = 0
+        val_idx_set = set(indices[:val_count])
+        train_mask = ~group.index.isin(val_idx_set)
+        train_parts.append(group.loc[train_mask])
+        if val_count > 0:
+            val_parts.append(group.loc[group.index.isin(val_idx_set)])
+    if not val_parts:
+        return df, df.iloc[:0]
+    train_df = pd.concat(train_parts).reset_index(drop=True)
+    val_df = pd.concat(val_parts).reset_index(drop=True)
+    return train_df, val_df

@@ -17,7 +17,6 @@ iris_dir: outputs/iris_normalized/
 normalize_meta: outputs/iris_normalized/normalize_meta.csv
 pigeon_csv: data/extracted/datasetXGN/pigeon.csv
 train_meta: data/train_meta.csv
-val_meta: data/val_meta.csv
 min_images_per_blood: 5
 min_images_per_blood_id: 2
 min_db_images_per_blood: 20
@@ -27,8 +26,7 @@ classes_per_batch: 16
 samples_per_class: 4
 batches_per_epoch: 0
 compare_eval_pairs: 200000
-pairs_train: data/pairs_train.csv
-pairs_val: data/pairs_val.csv
+pairs: data/pairs_train.csv
 
 # Fusion mode (Concat 1024d)
 fusion:
