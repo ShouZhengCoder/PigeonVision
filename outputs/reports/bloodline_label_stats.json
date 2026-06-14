@@ -1,0 +1,27 @@
+{
+  "images": 25690,
+  "images_with_blood_ids": 25690,
+  "unique_blood_ids": 51307,
+  "blood_id_frequency": {
+    "singleton": 27605,
+    "lte_2": 37601,
+    "gte_5": 7196,
+    "gte_20": 1078,
+    "max": 422
+  },
+  "blood_ids_per_image": {
+    "mean": 6.365511894226074,
+    "median": 5.0,
+    "p90": 13.0,
+    "max": 158
+  },
+  "metadata_missing": {
+    "pg_id": 3678,
+    "blood_name": 6117
+  },
+  "idf": {
+    "min": 4.106523835952072,
+    "median": 9.460748834438405,
+    "max": 9.460748834438405
+  }
+}

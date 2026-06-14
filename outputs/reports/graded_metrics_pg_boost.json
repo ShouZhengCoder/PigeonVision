@@ -1,0 +1,33 @@
+{
+  "query_db": "/home/u2023312335/project/learn/PigeonVision/outputs/features/fusion_1024d_full",
+  "gallery_db": "/home/u2023312335/project/learn/PigeonVision/outputs/features/fusion_1024d_full_pg",
+  "sample_query": 5000,
+  "graded_relevance_search": {
+    "valid_queries": 4901,
+    "skipped_queries": 99,
+    "anchor_k": 3,
+    "beta": 0.4,
+    "pool_size": 1000,
+    "topk_strength_per_query": {
+      "strong": 1.554988777800449,
+      "weak": 0.8983880840644767,
+      "irrelevant": 7.546623138135074
+    },
+    "avg_relevance_at_1": 0.3017867087145024,
+    "avg_relevance_at_10": 0.13801594942654724,
+    "avg_relevance_at_5": 0.17416048796904177,
+    "avg_relevant_at_1": 0.4119567435217303,
+    "avg_relevant_at_10": 2.4533768618649257,
+    "avg_relevant_at_5": 1.4319526627218935,
+    "graded_ndcg_at_1": 0.329026009227343,
+    "graded_ndcg_at_10": 0.27356886512766515,
+    "graded_ndcg_at_5": 0.27436090756051384,
+    "hit_at_1": 0.4119567435217303,
+    "hit_at_10": 0.599877576004897,
+    "hit_at_5": 0.5370332585186697,
+    "mAP": 0.1887760248701747,
+    "precision_at_1": 0.4119567435217303,
+    "precision_at_10": 0.24533768618649276,
+    "precision_at_5": 0.2863905325443821
+  }
+}

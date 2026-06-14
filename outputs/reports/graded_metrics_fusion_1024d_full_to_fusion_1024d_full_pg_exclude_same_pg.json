@@ -1,0 +1,42 @@
+{
+  "query_db": "/home/u2023312335/project/learn/PigeonVision/outputs/features/fusion_1024d_full",
+  "gallery_db": "/home/u2023312335/project/learn/PigeonVision/outputs/features/fusion_1024d_full_pg",
+  "query_size": 5000,
+  "gallery_size": 25212,
+  "sample_query": 5000,
+  "exclude_same_pg": true,
+  "graded_relevance_search": {
+    "valid_queries": 4901.0,
+    "skipped_queries": 99.0,
+    "mean_relevant_total": 56.52968781881249,
+    "median_relevant_total": 16.0,
+    "p90_relevant_total": 159.0,
+    "mAP": 0.15710451033766706,
+    "topk_strength_per_query": {
+      "strong": 1.2028157518873699,
+      "weak": 0.8330952866761885,
+      "irrelevant": 7.964088961436442
+    },
+    "avg_relevance_at_1": 0.30180297551991697,
+    "avg_relevance_at_10": 0.11013538147657587,
+    "avg_relevance_at_5": 0.14794373853746803,
+    "avg_relevant_at_1": 0.41134462354621504,
+    "avg_relevant_at_10": 2.0359110385635586,
+    "avg_relevant_at_5": 1.26402774943889,
+    "binary_ndcg_at_1": 0.41134462354621504,
+    "binary_ndcg_at_10": 0.278386112642773,
+    "binary_ndcg_at_5": 0.30348872206023325,
+    "graded_ndcg_at_1": 0.3289101049773401,
+    "graded_ndcg_at_10": 0.24098512189048693,
+    "graded_ndcg_at_5": 0.2500203530472999,
+    "hit_at_1": 0.41134462354621504,
+    "hit_at_10": 0.6221179351152826,
+    "hit_at_5": 0.5635584574576618,
+    "precision_at_1": 0.41134462354621504,
+    "precision_at_10": 0.2035911038563591,
+    "precision_at_5": 0.25280554988778164,
+    "recall_at_1": 0.045547836012314366,
+    "recall_at_10": 0.13029276116690125,
+    "recall_at_5": 0.09671021737342786
+  }
+}

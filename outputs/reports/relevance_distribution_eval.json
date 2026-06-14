@@ -1,0 +1,115 @@
+{
+  "db": "fusion_1024d_full",
+  "queries_with_gallery_relevance": 4925,
+  "relevant_total_distribution": {
+    "mean": 56.742740631103516,
+    "median": 16.0,
+    "p90": 160.0,
+    "max": 1075
+  },
+  "topk_strength_per_query": {
+    "strong": 1.1057868020304569,
+    "weak": 0.8349238578680203,
+    "irrelevant": 8.059289340101524
+  },
+  "topk_strength_total": {
+    "strong": 5446,
+    "weak": 4112,
+    "irrelevant": 39692
+  },
+  "shared_blood_idf_quantile_topk": {
+    "q1_common": 9082,
+    "q2": 476
+  },
+  "query_buckets_num_blood_ids": {
+    "1-2": {
+      "queries": 1466,
+      "precision_at_10": 0.1673942701227824,
+      "avg_relevance_at_10": 0.12373834010848853,
+      "graded_ndcg_at_10": 0.253784894729783
+    },
+    "3-5": {
+      "queries": 1136,
+      "precision_at_10": 0.1580985915492952,
+      "avg_relevance_at_10": 0.0849553812183702,
+      "graded_ndcg_at_10": 0.18518020598490154
+    },
+    "6-10": {
+      "queries": 1603,
+      "precision_at_10": 0.19575795383655636,
+      "avg_relevance_at_10": 0.07816270243281206,
+      "graded_ndcg_at_10": 0.16799234801928375
+    },
+    ">10": {
+      "queries": 720,
+      "precision_at_10": 0.3013888888888889,
+      "avg_relevance_at_10": 0.1250377289210964,
+      "graded_ndcg_at_10": 0.2031795133665393
+    }
+  },
+  "query_buckets_relevant_total": {
+    "1-5": {
+      "queries": 1473,
+      "precision_at_10": 0.04806517311608969,
+      "avg_relevance_at_10": 0.03395412464101999,
+      "graded_ndcg_at_10": 0.17789962156306294
+    },
+    "21-100": {
+      "queries": 1427,
+      "precision_at_10": 0.2751927119831818,
+      "avg_relevance_at_10": 0.14435193536237934,
+      "graded_ndcg_at_10": 0.22265622942525287
+    },
+    "6-20": {
+      "queries": 1210,
+      "precision_at_10": 0.15661157024793348,
+      "avg_relevance_at_10": 0.09431238207873718,
+      "graded_ndcg_at_10": 0.2003168696540243
+    },
+    ">100": {
+      "queries": 815,
+      "precision_at_10": 0.37153374233128855,
+      "avg_relevance_at_10": 0.15105408197851636,
+      "graded_ndcg_at_10": 0.21574767967844538
+    }
+  },
+  "query_buckets_mask_confidence": {
+    "0.80-0.90": {
+      "queries": 1092,
+      "precision_at_10": 0.21437728937728884,
+      "avg_relevance_at_10": 0.11197980510739555,
+      "graded_ndcg_at_10": 0.22449817628404817
+    },
+    "0.90-0.95": {
+      "queries": 3833,
+      "precision_at_10": 0.18828593790764633,
+      "avg_relevance_at_10": 0.09677791529058831,
+      "graded_ndcg_at_10": 0.1964107343254239
+    }
+  },
+  "query_buckets_metadata": {
+    "complete": {
+      "queries": 3639,
+      "precision_at_10": 0.21321791701016937,
+      "avg_relevance_at_10": 0.10784438719036783,
+      "graded_ndcg_at_10": 0.21861660870295396
+    },
+    "missing_blood_name": {
+      "queries": 604,
+      "precision_at_10": 0.11208609271523179,
+      "avg_relevance_at_10": 0.05531873809827486,
+      "graded_ndcg_at_10": 0.13715232030466076
+    },
+    "missing_pg_id": {
+      "queries": 682,
+      "precision_at_10": 0.1645161290322576,
+      "avg_relevance_at_10": 0.0987880552624547,
+      "graded_ndcg_at_10": 0.1753790507880734
+    }
+  },
+  "topk_missing_metadata": {
+    "pg_id": 6329,
+    "blood_name": 10520
+  },
+  "error_rows_written": 49250
+}

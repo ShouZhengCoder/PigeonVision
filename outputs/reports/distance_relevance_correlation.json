@@ -1,0 +1,9 @@
+{
+  "pairs": 9126.0,
+  "pearson_distance_relevance": -0.522677075636227,
+  "spearman_distance_relevance": -0.5724493123244304,
+  "pearson_similarity_relevance": 0.522677075636227,
+  "spearman_similarity_relevance": 0.5724493123244304,
+  "mean_distance": 1.2748550176620483,
+  "mean_relevance": 0.17935259640216827
+}
