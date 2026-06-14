@@ -73,16 +73,16 @@ App 支持两种任务：
 
 ## 效果
 
-| 任务 | 指标 | 值 |
-|------|------|:--:|
-| Search | Hit@1 | **70.9%** |
-| | Hit@5 | **83.8%** |
-| | Hit@10 | **87.8%** |
-| | mAP | **60.7%** |
-| Compare | AUC | **99.5%** |
-| | BalAcc | **97.0%** |
+| 任务 | 指标 | 干净切分 | 全量训练 |
+|------|------|:---:|:---:|
+| Search | Hit@1 | **68.0%** | 70.9% |
+| | Hit@5 | **75.5%** | 83.8% |
+| | Hit@10 | **78.1%** | 87.8% |
+| | mAP | **54.9%** | 60.7% |
+| Compare | AUC | **87.4%** | 99.5% |
+| | BalAcc | **84.0%** | 97.0% |
 
-> 当前服务器优化版采用单路 `relation_supcon_256d` 特征，生产检索库 `outputs/features/relation_supcon_256d/` 使用 `normalize_meta.csv` 中全部 `status=success` 且 PNG 存在的虹膜图，当前全量 25,690 张。旧三路融合 `fusion_1024d_full` 方案为 Hit@1 64.3%、Hit@10 85.7%、mAP 50.4%、Compare AUC 98.0%。详细实验记录见 [docs/experiments.md](docs/experiments.md) 和 [docs/performance_improvement_journey.md](docs/performance_improvement_journey.md)。
+> 干净切分：训练集 17,983 张 / 测试集 2,526 张，严格排除数据泄漏。全量训练：25,690 张全部用于训练，生产部署方案。当前生产模型采用全量训练 Relation-SupCon 256d，生产检索库 `outputs/features/relation_supcon_256d/`。详细实验记录见 [docs/experiments.md](docs/experiments.md) 和 [docs/performance_improvement_journey.md](docs/performance_improvement_journey.md)。
 
 ## 项目结构
 
