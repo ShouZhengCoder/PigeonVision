@@ -79,8 +79,8 @@ App 支持两种任务：
 | | Hit@5 | **75.5%** | 83.8% |
 | | Hit@10 | **78.1%** | 87.8% |
 | | mAP | **54.9%** | 60.7% |
-| Compare | AUC | **87.4%** | 99.5% |
-| | BalAcc | **84.0%** | 97.0% |
+| Compare | AUC | **88.0%** | 99.5% |
+| | BalAcc | **83.9%** | 97.0% |
 
 > 干净切分：训练集 17,983 张 / 测试集 2,526 张，严格排除数据泄漏。全量训练：25,690 张全部用于训练，生产部署方案。当前生产模型采用全量训练 Relation-SupCon 256d，生产检索库 `outputs/features/relation_supcon_256d/`。详细实验记录见 [docs/experiments.md](docs/experiments.md) 和 [docs/performance_improvement_journey.md](docs/performance_improvement_journey.md)。
 

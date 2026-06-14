@@ -144,26 +144,31 @@ def main() -> int:
     train_transform = default_transform(input_shape=(64, 512), train=True)
     eval_transform = default_transform(input_shape=(64, 512), train=False)
 
-    # Full data: read ALL rows, ignore split column
     train_ds = RelationDataset(
         relation_meta,
         resolve_root_path(args.iris_dir),
-        split=None,
+        split="train",
         transform=train_transform,
         limit=int(args.limit_train) or None,
     )
-
-    # Internal stratified split for validation monitoring
-    all_rows = train_ds.rows
-    tr_rows, val_rows = split_meta_for_training(
-        all_rows, val_ratio=0.1, seed=int(args.seed), group_col="blood_name"
+    val_ds = RelationDataset(
+        relation_meta,
+        resolve_root_path(args.iris_dir),
+        split="val",
+        transform=eval_transform,
+        limit=int(args.limit_val) or None,
     )
-    train_indices = tr_rows.index.tolist()
-    val_indices = val_rows.index.tolist()
-    val_ds = Subset(train_ds, val_indices)
-    logger.info("full=%s train=%s val=%s", len(all_rows), len(train_indices), len(val_indices))
+    eval_gallery_ds = RelationDataset(
+        relation_meta,
+        resolve_root_path(args.iris_dir),
+        split="train",
+        transform=eval_transform,
+        limit=int(args.limit_train) or None,
+    )
 
-    blood_id_sets = blood_id_sets_from_rows(all_rows)
+    logger.info("train=%s val=%s", len(train_ds), len(val_ds))
+
+    blood_id_sets = blood_id_sets_from_rows(eval_gallery_ds.rows, val_ds.rows)
     idf = build_blood_id_idf(blood_id_sets)
 
     sampler = RelationBatchSampler(
