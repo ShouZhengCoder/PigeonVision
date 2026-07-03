@@ -49,6 +49,12 @@ SYNC_FILES = [
     "outputs/features/relation_supcon_256d/eval_metrics.json",
     "outputs/features/relation_supcon_256d/eval_comparison.json",
     "outputs/features/relation_supcon_256d/threshold.json",
+    # Relation-SupCon 256d PG_ID centroid (search mode=pg)
+    "outputs/features/relation_supcon_256d_pg/faiss_index.bin",
+    "outputs/features/relation_supcon_256d_pg/feature_db.npy",
+    "outputs/features/relation_supcon_256d_pg/feature_db_meta.csv",
+    "outputs/features/relation_supcon_256d_pg/build_manifest.json",
+    "outputs/features/relation_supcon_256d_pg/threshold.json",
     # Fusion 1024d (legacy)
     "outputs/features/fusion_1024d_full/faiss_index.bin",
     "outputs/features/fusion_1024d_full/feature_db.npy",
