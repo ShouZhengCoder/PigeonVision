@@ -632,6 +632,59 @@ Android 端不做 U-Net 分割、IrisEncoder 特征提取或 FAISS 检索。
 
 ---
 
+## 阶段七：族谱亲缘（CCF-B 表征学习论文，进行中）
+
+**目标**：投 CCF-B 表征学习期刊。两个贡献：①定义数据集 + 证明虹膜可判定血缘；②用族谱图编码定义血缘远近。
+
+### 数据真相（Stage 7 核心发现）
+
+- `pigeon.csv` 的 `PID/CID/SID` 经核查是**分类码**（省份/城市/鸽舍），非亲子 ID，不可用于族谱。
+- `details.txt`（106MB）是**完整血统书原文**，含结构化字段 `父亲/母亲/祖父/祖母/外祖父/外祖母:足环号`，是真实系谱来源；`relations.csv` 是从中抽取足环号时丢弃辈分的扁平版。
+- `blood_id` 是**祖先个体足环号**（如 `B98-3158062` 是出现在 525 张图里的著名基础种鸽），非品系名。
+
+### 编码方案（两者都做）
+
+- **形式 A（字符串祖先路径码，对应老师原意）**：founder 唯一短码 `F1..Fn`，后代码 = 排序的 `F{idx}:{min_depth}` token 序列。
+- **形式 B（祖先贡献向量 + 亲缘系数，数学度量）**：`v[a] = Σ_{path} (1/2)^depth`，`k(i,j) = v_i · v_j`（≈2×标准亲缘系数 φ_ij，founder 视为非近交）。B 是 A 的数学化泛化。
+- 无结构系谱者用 `relations.csv` 的 blood_id IDF 加权兜底（同索引空间）。
+
+### 脚本与输出
+
+| 文件 | 内容 |
+|------|------|
+| `src/stage7_kinship/parse_pedigree.py` | 解析 details.txt → `data/pedigree/parsed_pedigree.csv`（126,105 行，6 角色字段） |
+| `src/stage7_kinship/build_pedigree_graph.py` | 建族谱图 → `pedigree_edges.csv`、`founders.csv`（环号合法性过滤，53,158 节点/19,642 边） |
+| `src/stage7_kinship/kinship_encoding.py` | 贡献向量 + 字符串码 → `contribution_vectors.csv`、`ancestry_codes.csv`、`founder_codes.csv` |
+| `src/stage7_kinship/validate_kinship.py` | 内部验证 → `paper/phaseA_kinship_validation.md`、`paper/fig/kinship_validation.png` |
+
+### Phase A 结果（已完成，里程碑）
+
+亲缘度量单调性验证通过（全量）：
+
+| 关系 | n | mean k |
+|------|---|--------|
+| 全同胞 | 1,299 | 0.715 |
+| 半同胞 | 2,895 | 0.400 |
+| 共享祖先(非同胞) | 2,950 | 0.104 |
+| 无共享祖先 | 496,239 | 0.000 |
+
+数值与理论吻合；fallback Spearman=0.44；近交 1.8% 正确处理。
+
+### Phase B / C（待办）
+
+- **Phase B（贡献①）**：数据集卡定稿；用现有 relation_supcon 编码器抽全量特征；证明虹膜 L2 距离 ↔ 亲缘 k 相关（Spearman/多 tier AUC/分层 Hit@K/graded nDCG）；对比 IDF 启发式 baseline。
+- **Phase C**：用 `k(i,j)` 替换 `loss_relation.py` 的 relevance matrix 做 graded SupCon 重训；最终评估 + 论文图表。
+
+### Stage 7 验收（Phase A）
+
+- [x] details.txt 解析 + 覆盖率统计
+- [x] 族谱图构建 + founder/环检测
+- [x] 编码与亲缘度量（形式 A + B）
+- [x] 单调性验证通过
+- [x] 文档与报告
+
+---
+
 ## 依赖汇总
 
 ```
