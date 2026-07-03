@@ -207,7 +207,7 @@ def main() -> int:
         load_warm_start(encoder, resolve_root_path(args.warm_start), device, logger)
 
     rng = np.random.default_rng(int(args.seed))
-    gallery_indices = train_indices.copy()
+    gallery_indices = list(range(len(train_ds)))
     if int(args.eval_gallery_size) > 0 and len(gallery_indices) > int(args.eval_gallery_size):
         gallery_indices = sorted(rng.choice(gallery_indices, size=int(args.eval_gallery_size), replace=False).tolist())
     eval_val_indices = list(range(len(val_ds)))
@@ -246,7 +246,7 @@ def main() -> int:
         metrics = {"graded_ndcg_at_10": 0.0, "avg_relevance_at_10": 0.0, "precision_at_10": 0.0, "mAP": 0.0}
         if int(args.eval_every) > 0 and epoch % int(args.eval_every) == 0:
             gids, gfeats = extract_features(encoder, train_ds, gallery_indices, device, int(args.batch_size), int(args.num_workers))
-            vids, vfeats = extract_features(encoder, train_ds, eval_val_indices, device, int(args.batch_size), int(args.num_workers))
+            vids, vfeats = extract_features(encoder, val_ds, eval_val_indices, device, int(args.batch_size), int(args.num_workers))
             if len(gfeats) and len(vfeats):
                 metrics = compute_cross_search_metrics_by_graded_blood_ids(
                     vfeats,
