@@ -13,6 +13,9 @@ outputs/features/**/threshold.json
 outputs/features/embeddings/
 checkpoints/
 
+# ---- 本地备份（重跑前安全副本，不进 git）----
+backups/
+
 # ---- 训练日志 ----
 logs/
 
