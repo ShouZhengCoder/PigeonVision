@@ -99,16 +99,20 @@ def main():
             return (TOK_F, fcode[ring])
         return (TOK_N, ncode.get(ring, -1))
 
-    # 递归拼接码 (深度截断)
-    def literal_code(node, depth=0):
-        if depth >= args.max_depth or node not in parent_map:
+    # 递归拼接码: code(child) = code(father) ++ code(mother), 递归到 founder
+    # 终止。无深度截断(贴合老师无界递归原意), 用路径内成环守卫处理 5 个真实记录环。
+    def literal_code(node, path=()):
+        if node in path:           # 成环守卫
+            return [token(node)]
+        if node not in parent_map:  # founder
             return [token(node)]
         fa, mo = parent_map[node]
         code = []
+        new_path = path + (node,)
         if ok(fa):
-            code.extend(literal_code(fa, depth + 1))
+            code.extend(literal_code(fa, new_path))
         if ok(mo):
-            code.extend(literal_code(mo, depth + 1))
+            code.extend(literal_code(mo, new_path))
         return code or [token(node)]
 
     # 编码所有可达节点 + 可用鸽子
@@ -169,8 +173,8 @@ def main():
     print(f'编码节点: 全图 founder {len(founders)} + 可达非founder {len(nonf)}; '
           f'可用鸽子有码 {len(struct)}/{len(usable)}')
     lens = [len(c) for c in codes.values() if c]
-    print(f'码长: mean={np.mean(lens):.1f}, max={max(lens)}, '
-          f'(深度截断 max_depth={args.max_depth}, 理论上限 {2**args.max_depth})')
+    print(f'码长: mean={np.mean(lens):.1f}, max={max(lens)} '
+          f'(无深度截断, 递归到 founder; 路径内成环守卫)')
     print('--- 单调性 ---')
     print(f'  全同胞:     {stats(full)}')
     print(f'  半同胞:     {stats(half)}')
