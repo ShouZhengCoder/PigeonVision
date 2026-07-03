@@ -22,7 +22,8 @@ Full spec: read `ROADMAP.md` before writing any code.
 | `data/extracted/datasetXGN/anotations/` | 9,979 JSON annotation files (eye bounding boxes) |
 | `data/extracted/datasetXGN/relations.csv` | 250,207 (blood_id, img_id) pairs — **no header row**, use `header=None, names=['blood_id','img_id']`; primary source for pair building |
 | `data/extracted/datasetXGN/blood.csv` | **DEPRECATED** — wide-format bloodline table; all data is a subset of relations.csv; do not use in new scripts |
-| `data/extracted/datasetXGN/pigeon.csv` | 113,844 records with ID, PG_ID, BLOOD, EYE fields |
+| `data/extracted/datasetXGN/pigeon.csv` | 113,844 records, 11 cols `ID,PID,CID,SID,NAME,COLOR,EYE,PG_ID,SEX,BLOOD,IMG`. **PID/CID/SID are category codes (province/city/loft), NOT parent/pedigree IDs** — verified 0% reference the ID column |
+| `data/extracted/datasetXGN/details.txt` | **True pedigree source** — 106MB, 126,105 lines, one per pigeon: `<img_id>\t<血统书原文>` with structured fields `父亲:/母亲:/祖父:/祖母:/外祖父:/外祖母:` + ring number. relations.csv was extracted from this by stripping role/depth. Parse with `src/stage7_kinship/parse_pedigree.py` |
 | `data/extracted/datasetXGN/img_list.txt` | 31,900 image IDs, one per line |
 | `data/unet_labelme_80/` | 80 manually labeled iris samples for U-Net v1 |
 | `outputs/img_index.csv` | **Built in Stage 1**: img_id → absolute file path (all scripts use this) |
@@ -53,7 +54,9 @@ def load_img_index():
 
 - `relations.csv` has **no header row** — always read with `header=None, names=['blood_id','img_id']`; do NOT use `blood.csv` (deprecated)
 - Annotation JSONs contain labels `"eye"`, `"mouse"`, `"900"` → **keep only `"eye"`**
-- `pigeon.csv` has 11 columns: `ID, PID, CID, SID, NAME, COLOR, EYE, PG_ID, SEX, BLOOD, IMG`; field `weidth` in annotation JSONs is a typo for `width` — use as-is
+- `pigeon.csv` has 11 columns: `ID, PID, CID, SID, NAME, COLOR, EYE, PG_ID, SEX, BLOOD, IMG`. **PID/CID/SID are category codes (32/227/1114 unique values), NOT parent IDs** — do not use them for pedigree. Field `weidth` in annotation JSONs is a typo for `width` — use as-is
+- `blood_id` in relations.csv is an **ancestor pigeon's ring number** (e.g. `B98-3158062` = Belgium 1998 ring 3158062, a foundation breeder appearing in 525 descendant images), NOT a strain name. Strain names live in the `BLOOD` column.
+- **True parent-child pedigree is in `details.txt`** (structured `父亲/母亲/祖父/祖母/外祖父/外祖母:足环号` fields), never parsed before Stage 7. Use it for pedigree graphs; relations.csv is the dense but depth-stripped fallback.
 - Stage 4 expects 3-channel RGB input; `outputs/iris_normalized/*.png` should be 64×512 3-channel normalized iris images
 - Multi-label bloodlines: each image averages 6.4 blood_ids; evaluation must use blood_id overlap (not blood_name match) for accuracy
 - Best/current production model: Relation-SupCon 256d single encoder (`checkpoints/siamese/relation_supcon/best.pt`) with `outputs/features/relation_supcon_256d/`; legacy 1024d fusion is retained only as an old baseline

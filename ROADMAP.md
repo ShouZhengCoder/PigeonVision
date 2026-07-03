@@ -60,8 +60,9 @@ PigeonVision/
 │   └── datasetXGN/
 │       ├── anotations/               ← 9,979 个 JSON 标注文件
 │       ├── blood.csv                 ← 28,910 条血统
-│       ├── pigeon.csv                ← 113,844 条鸽子记录
-│       ├── relations.csv             ← 250,207 条血统-图片关系
+│       ├── pigeon.csv                ← 113,844 条鸽子记录（PID/CID/SID 是分类码，非亲子）
+│       ├── details.txt               ← 106MB 血统书原文，含父母祖父母足环号（真系谱来源）
+│       ├── relations.csv             ← 250,207 条血统-图片关系（从 details 抽取，丢辈分）
 │       └── img_list.txt              ← 31,900 行图片 ID
 │
 ├── src/
@@ -187,7 +188,11 @@ rel['img_id'] = rel['img_id'].astype(str)
 | SEX | 性别 |
 | IMG | 原始图片 URL |
 
-实际共 11 列：`ID, PID, CID, SID, NAME, COLOR, EYE, PG_ID, SEX, BLOOD, IMG`。
+实际共 11 列：`ID, PID, CID, SID, NAME, COLOR, EYE, PG_ID, SEX, BLOOD, IMG`。其中 `PID/CID/SID` 经核查是**分类码**（省份/城市/鸽舍，分别仅 32/227/1114 个唯一值，0% 引用 ID 列），**不是亲子 ID**，不可用于构建族谱。
+
+### details.txt（真实系谱来源，Stage 7 起使用）
+
+每行 `<img_id>\t<血统书原文>`，原文含结构化字段 `父亲:<环号>`、`母亲:<环号>`、`祖父:<环号>`、`祖母:<环号>`、`外祖父:<环号>`、`外祖母:<环号>`，即每只鸽子最多 2 代父母系谱。126,105 行中 17,014(13.5%) 有至少一个角色字段，6,393(5.1%) 父母双全。`relations.csv` 是从此文件抽取足环号时**丢弃角色与辈分**的扁平版。`blood_id`（如 `B98-3158062`）是**祖先个体足环号**而非品系名。解析见 `src/stage7_kinship/parse_pedigree.py`。
 
 ### YOLO 标注格式
 
