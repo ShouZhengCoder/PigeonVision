@@ -16,7 +16,7 @@ from tqdm import tqdm
 from _common import ROOT, ensure_dir, resolve_root_path
 from dataset import default_transform, split_meta_for_training
 from dataset_relation import RelationBatchSampler, RelationDataset, collate_relation
-from loss_relation import relation_relevance_matrix, weighted_supcon_loss
+from loss_relation import kinship_relevance_matrix, relation_relevance_matrix, weighted_supcon_loss
 from model import IrisEncoder
 from relation_metrics import build_blood_id_idf, compute_cross_search_metrics_by_graded_blood_ids
 
@@ -27,6 +27,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iris-dir", type=Path, default=ROOT / "outputs" / "iris_normalized")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints" / "siamese" / "relation_supcon")
     parser.add_argument("--warm-start", type=Path, default=ROOT / "checkpoints" / "siamese" / "best.pt")
+    parser.add_argument("--kinship-source", choices=["idf", "pedigree"], default="idf",
+                        help="Relevance source: idf (blood_id heuristic, baseline) or pedigree (Phase C hybrid k).")
+    parser.add_argument("--kinship-vectors", type=Path, default=ROOT / "data" / "pedigree" / "contribution_vectors.csv",
+                        help="Phase A contribution vectors (used when --kinship-source pedigree).")
     parser.add_argument("--feat-dim", type=int, default=256)
     parser.add_argument("--backbone", default="resnet34")
     parser.add_argument("--epochs", type=int, default=60)
@@ -150,6 +154,7 @@ def main() -> int:
         split="train",
         transform=train_transform,
         limit=int(args.limit_train) or None,
+        kinship_vectors=resolve_root_path(args.kinship_vectors) if args.kinship_source == "pedigree" else None,
     )
     val_ds = RelationDataset(
         relation_meta,
@@ -180,6 +185,7 @@ def main() -> int:
         strong_threshold=float(args.strong_threshold),
         batches_per_epoch=int(args.batches_per_epoch) or None,
         seed=int(args.seed),
+        use_kinship=(args.kinship_source == "pedigree"),
     )
     train_loader = DataLoader(
         train_ds,
@@ -224,7 +230,10 @@ def main() -> int:
         skipped = 0
         for batch in tqdm(train_loader, desc=f"relation supcon {epoch}"):
             images = batch["images"].to(device, non_blocking=True)
-            relevance = relation_relevance_matrix(batch["blood_id_indices"], train_ds.idf_by_index, device)
+            if args.kinship_source == "pedigree":
+                relevance = kinship_relevance_matrix(batch["img_ids"], train_ds.kinship, device)
+            else:
+                relevance = relation_relevance_matrix(batch["blood_id_indices"], train_ds.idf_by_index, device)
             if not (relevance > 0.0).any():
                 skipped += 1
                 continue

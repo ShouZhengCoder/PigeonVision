@@ -55,6 +55,9 @@ def relation_score(left: set[int], right: set[int], idf: dict[int, float]) -> fl
 
 
 class RelationDataset(Dataset):
+    # Phase C: pedigree k 归一化常数(全同胞观测均值 0.715), 使 pedigree k 与 IDF 同尺度 [0,1]
+    PED_K_NORM = 0.715
+
     def __init__(
         self,
         meta_path: str | Path,
@@ -62,6 +65,7 @@ class RelationDataset(Dataset):
         split: str | None = None,
         transform=None,
         limit: int | None = None,
+        kinship_vectors: str | Path | None = None,
     ) -> None:
         self.meta_path = Path(meta_path)
         self.iris_dir = Path(iris_dir)
@@ -90,6 +94,35 @@ class RelationDataset(Dataset):
         self.idf_by_index = self._build_idf()
         self.sum_idf = np.asarray([_set_weight(ids, self.idf_by_index) for ids in self.blood_id_sets], dtype=np.float64)
         self.inverted = self._build_inverted()
+        self.kinship_vec = self._load_kinship_vectors(kinship_vectors)
+        self.blood_id_sets_by_img = {self.img_ids[i]: self.blood_id_sets[i] for i in range(len(self.img_ids))}
+
+    def _load_kinship_vectors(self, path: str | Path | None) -> dict[str, dict[str, float]]:
+        """加载 Phase A 的 contribution_vectors.csv -> {img_id: {ancestor: contrib}}。"""
+        if path is None:
+            return {}
+        p = Path(path)
+        if not p.exists():
+            return {}
+        df = pd.read_csv(p, dtype=str)
+        vec: dict[str, dict[str, float]] = defaultdict(dict)
+        for iid, anc, c in zip(df["img_id"].astype(str), df["ancestor"].astype(str),
+                                df["contribution"].astype(float)):
+            vec[iid][anc] = float(c)
+        return dict(vec)
+
+    def kinship(self, a_img_id: str, b_img_id: str) -> float:
+        """Hybrid 亲缘 k ∈ [0,1]: 两端都结构化 -> pedigree 点积(归一化); 否则 IDF 启发式兜底。"""
+        va = self.kinship_vec.get(str(a_img_id))
+        vb = self.kinship_vec.get(str(b_img_id))
+        if va and vb:
+            small, large = (va, vb) if len(va) <= len(vb) else (vb, va)
+            k = sum(c * large.get(x, 0.0) for x, c in small.items()) / self.PED_K_NORM
+            return float(max(0.0, min(1.0, k)))
+        # IDF 兜底(覆盖无结构系谱的鸽子)
+        sa = self.blood_id_sets_by_img.get(str(a_img_id), set())
+        sb = self.blood_id_sets_by_img.get(str(b_img_id), set())
+        return relation_score(sa, sb, self.idf_by_index)
 
     def _build_idf(self) -> dict[int, float]:
         n = len(self.blood_id_sets)
@@ -122,16 +155,20 @@ class RelationDataset(Dataset):
             pg_id=self.pg_ids[int(index)],
         )
 
-    def candidate_scores(self, index: int) -> list[tuple[int, float]]:
+    def candidate_scores(self, index: int, use_kinship: bool = False) -> list[tuple[int, float]]:
         query = self.blood_id_sets[int(index)]
         candidates: set[int] = set()
         for value in query:
             candidates.update(self.inverted.get(int(value), []))
         candidates.discard(int(index))
-        scored = [
-            (idx, relation_score(query, self.blood_id_sets[idx], self.idf_by_index))
-            for idx in candidates
-        ]
+        if use_kinship and self.kinship_vec:
+            qid = self.img_ids[int(index)]
+            scored = [(idx, self.kinship(qid, self.img_ids[idx])) for idx in candidates]
+        else:
+            scored = [
+                (idx, relation_score(query, self.blood_id_sets[idx], self.idf_by_index))
+                for idx in candidates
+            ]
         return [(idx, score) for idx, score in scored if score > 0.0]
 
     def relevance(self, left: int, right: int) -> float:
@@ -152,6 +189,7 @@ class RelationBatchSampler(Sampler[list[int]]):
         strong_threshold: float = 0.35,
         batches_per_epoch: int | None = None,
         seed: int = 42,
+        use_kinship: bool = False,
     ) -> None:
         self.dataset = dataset
         self.anchors_per_batch = int(anchors_per_batch)
@@ -160,6 +198,7 @@ class RelationBatchSampler(Sampler[list[int]]):
         self.hard_neg_per_anchor = int(hard_neg_per_anchor)
         self.strong_threshold = float(strong_threshold)
         self.seed = int(seed)
+        self.use_kinship = bool(use_kinship)
         self.epoch = 0
         self.positive_anchors = [idx for idx in range(len(dataset)) if dataset.has_positive(idx)]
         if not self.positive_anchors:
@@ -183,7 +222,8 @@ class RelationBatchSampler(Sampler[list[int]]):
 
     def _candidates(self, index: int) -> list[tuple[int, float]]:
         if int(index) not in self._candidate_cache:
-            self._candidate_cache[int(index)] = self.dataset.candidate_scores(int(index))
+            self._candidate_cache[int(index)] = self.dataset.candidate_scores(
+                int(index), use_kinship=self.use_kinship)
         return self._candidate_cache[int(index)]
 
     def _sample_from(self, rng: random.Random, candidates: list[int], k: int) -> list[int]:

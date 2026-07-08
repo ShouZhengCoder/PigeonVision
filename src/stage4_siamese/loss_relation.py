@@ -34,6 +34,30 @@ def relation_relevance_matrix(
     return out.clamp_(0.0, 1.0)
 
 
+def kinship_relevance_matrix(
+    batch_img_ids: list[str],
+    kinship_fn,
+    device: torch.device,
+) -> torch.Tensor:
+    """Graded relevance matrix from a pedigree-kinship function (Phase C).
+
+    kinship_fn(a_img_id, b_img_id) -> float in [0, 1] (hybrid: pedigree dot
+    where both structured, IDF heuristic fallback otherwise). Symmetric;
+    zero means unrelated. Replaces relation_relevance_matrix when
+    --kinship-source pedigree, feeding the same weighted_supcon_loss.
+    """
+    batch_size = len(batch_img_ids)
+    out = torch.zeros(batch_size, batch_size, dtype=torch.float32, device=device)
+    for i in range(batch_size):
+        a = batch_img_ids[i]
+        for j in range(i + 1, batch_size):
+            k = float(kinship_fn(a, batch_img_ids[j]))
+            if k > 0.0:
+                out[i, j] = k
+                out[j, i] = k
+    return out.clamp_(0.0, 1.0)
+
+
 def weighted_supcon_loss(
     embeddings: torch.Tensor,
     relevance: torch.Tensor,
