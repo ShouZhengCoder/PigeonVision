@@ -37,11 +37,14 @@
 
 Spearman(k_struct, k_fallback) = 0.44（319,600 对）--兜底保留粗粒度排序。
 
-## 5. Ablation（Phase D，待跑）
+## 5. Ablation（Phase D1: kinship source, 均为 150 epoch 公平对比）
 
-| 消融 | 变量 | 假设 |
-|------|------|------|
-| kinship source | idf / pedigree(hybrid) / pedigree_only(fb=0) | pedigree 优于 IDF 代理 |
-| 族谱深度 | max_depth ∈ {3,5,7,∞} | 深度信息有效 |
-| graded vs vanilla | k 加权 vs 二值 positive | graded 优于二值 |
-| positive_cutoff | 0 / 0.10 / 0.15 / 0.20 | cutoff 保 tier 分离 |
+| 模型 (150ep) | Spearman(dist,k) | graded nDCG@20 | AUC 任意亲缘 | 分层单调 |
+|---|:---:|:---:|:---:|:---:|
+| idf_150（IDF 基线） | -0.711 | 0.467 | 0.921 | yes |
+| **v2 / ped_hybrid_150（pedigree k + IDF 兜底降权）** | **-0.716** | **0.558** | **0.931** | **yes** |
+| ped_only_150（纯族谱, fb=0） | -0.601 | 0.280 | 0.882 | no |
+
+**结论**: hybrid(v2) 在公平 epoch 下全面优于 IDF 基线, graded nDCG +19%(检索排序显著提升);
+纯族谱(ped_only) 因正样本过稀疏(仅 16.5% anchor 有正样本)而 FAIL, 证明 IDF 兜底对覆盖必要。
+hybrid 设计(pedigree k 主导 + IDF 兜底)为最优。

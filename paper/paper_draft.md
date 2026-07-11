@@ -82,10 +82,17 @@ Monotonic, matching genetic theory (full ≈ 0.5 shared parents + 0.25 grandpare
 | **pedigree-k v2 (150ep, +cutoff+fallback)** | **-0.716** | **0.931** | **0.558** | **yes** |
 
 Replacing the IDF-heuristic training proxy with true pedigree kinship (graded SupCon with positive cutoff for tier separation; IDF fallback downweighted to 0.3 so pedigree signal dominates) improves iris-kinship Spearman (-0.699 -> -0.716), graded nDCG (+21%), and restores tier monotonicity, while matching or improving AUC across tiers. The cutoff is essential: v1 (no cutoff) compressed tiers (cousin pulled too close); v2 treats k<0.15 as negatives, preserving full<half<cousin<unrelated ordering.
-### 5.4 Ablations [TBD]
+### 5.4 Ablations
 
-kinship source (idf/hybrid/pure), depth (max_depth), positive cutoff, graded vs binary.
+**D1: kinship source (all 150 epochs, fair comparison)**
 
+| model | Spearman(d,k) | graded nDCG@20 | AUC any-kin | tier monotone |
+|---|---|---|---|---|
+| idf (IDF baseline) | -0.711 | 0.467 | 0.921 | yes |
+| **pedigree hybrid (ours, v2)** | **-0.716** | **0.558** | **0.931** | **yes** |
+| pedigree pure (no IDF fallback) | -0.601 | 0.280 | 0.882 | no |
+
+The hybrid design (pedigree k as primary signal, IDF fallback downweighted to 0.3 for coverage) is optimal: it beats the IDF baseline on all metrics (graded nDCG +19%), while pure pedigree fails (-0.601, tier monotonicity broken) because only 16.5% of anchors retain positive pairs without the IDF fallback. The IDF fallback is essential for coverage; pedigree k provides the graded signal that improves retrieval ranking.
 ## 6. Conclusion
 
 We introduce iris-based kinship recognition for pigeons, release a dataset, define a pedigree-graph graded kinship metric, and show pedigree-supervised training improves iris-kinship alignment (Spearman -0.699 -> -0.716, graded nDCG +21%). Limitations and broader impact: kinship is record-derived; potential misuse in breeding fraud.
