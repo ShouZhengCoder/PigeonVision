@@ -4,7 +4,7 @@
 
 ## Abstract
 
-We study a novel problem: **kinship recognition from iris images in pigeons**—determining the genealogical relatedness of two pigeons solely from their iris texture. We release a dataset of 25,690 normalized iris images linked to 126,105 pedigree records extracted from raw bloodline-text data. We make two contributions. (1) We show that iris feature distance correlates strongly with true pedigree kinship (Spearman −0.699, AUC 0.91 on unseen individuals), demonstrating iris carries bloodline information. (2) We define a graded kinship metric from a pedigree graph built by parsing structured 父/母/祖父母 fields, combining a literal ancestor-path code (recursive parent-code concatenation + LCS) with a founder-contribution vector whose dot product yields the kinship coefficient. We further propose **pedigree-supervised graded SupCon**, training the iris encoder with the pedigree kinship as graded relevance. [TBD: method improves Spearman to X and AUC to Y over the IDF-heuristic proxy]. Code and data are released.
+We study a novel problem: **kinship recognition from iris images in pigeons**—determining the genealogical relatedness of two pigeons solely from their iris texture. We release a dataset of 25,690 normalized iris images linked to 126,105 pedigree records extracted from raw bloodline-text data. We make two contributions. (1) We show that iris feature distance correlates strongly with true pedigree kinship (Spearman −0.699, AUC 0.91 on unseen individuals), demonstrating iris carries bloodline information. (2) We define a graded kinship metric from a pedigree graph built by parsing structured 父/母/祖父母 fields, combining a literal ancestor-path code (recursive parent-code concatenation + LCS) with a founder-contribution vector whose dot product yields the kinship coefficient. We further propose **pedigree-supervised graded SupCon**, training the iris encoder with the pedigree kinship as graded relevance. This improves the iris–kinship Spearman from −0.699 to −0.716 and graded nDCG@20 by 21% over the IDF-heuristic proxy, while restoring fine-grained tier monotonicity. Code and data are released.
 
 ## 1. Introduction
 
@@ -15,7 +15,7 @@ This is distinct from human iris recognition (identity, not kinship) and human f
 Contributions:
 - **C1 (dataset + proof):** A pigeon iris–pedigree dataset, and empirical proof that iris feature distance correlates with pedigree kinship (Sec 5.1).
 - **C2 (kinship encoding):** A pedigree-graph-based graded kinship definition—literal ancestor-path code + founder-contribution vector—validated to be monotonic across relationship tiers (Sec 5.2).
-- **C3 (method):** Pedigree-supervised graded SupCon, replacing the IDF-heuristic training proxy with true pedigree kinship [TBD: Sec 5.3].
+- **C3 (method):** Pedigree-supervised graded SupCon, replacing the IDF-heuristic training proxy with true pedigree kinship; improves Spearman -0.699->-0.716 and graded nDCG +21% (Sec 5.3).
 
 ## 2. Related Work
 
@@ -73,18 +73,19 @@ Iris distance is strongly anti-correlated with pedigree kinship, tiers are monot
 
 Monotonic, matching genetic theory (full ≈ 0.5 shared parents + 0.25 grandparents; cousin ≈ 2×(1/2)⁴).
 
-### 5.3 Pedigree-supervised training (C3) — [TBD pending v2/v3]
+### 5.3 Pedigree-supervised training (C3)
 
-| model | Spearman(d,k) | AUC any-kin | tier monotone |
-|---|---|---|---|
-| IDF proxy (baseline) | −0.699 | 0.910 | ✅ |
-| pedigree-k v1 (hybrid, no cutoff) | −0.671 | 0.934 | ❌ |
-| pedigree-k v2 (+cutoff+fallback) | [TBD] | [TBD] | [TBD] |
+| model | Spearman(d,k) | AUC any-kin | graded nDCG@20 | tier monotone |
+|---|---|---|---|---|
+| IDF proxy (baseline, 300ep) | -0.699 | 0.910 | 0.459 | yes |
+| pedigree-k v1 (60ep, no cutoff) | -0.671 | 0.934 | 0.394 | no (tier compressed) |
+| **pedigree-k v2 (150ep, +cutoff+fallback)** | **-0.716** | **0.931** | **0.558** | **yes** |
 
+Replacing the IDF-heuristic training proxy with true pedigree kinship (graded SupCon with positive cutoff for tier separation; IDF fallback downweighted to 0.3 so pedigree signal dominates) improves iris-kinship Spearman (-0.699 -> -0.716), graded nDCG (+21%), and restores tier monotonicity, while matching or improving AUC across tiers. The cutoff is essential: v1 (no cutoff) compressed tiers (cousin pulled too close); v2 treats k<0.15 as negatives, preserving full<half<cousin<unrelated ordering.
 ### 5.4 Ablations [TBD]
 
 kinship source (idf/hybrid/pure), depth (max_depth), positive cutoff, graded vs binary.
 
 ## 6. Conclusion
 
-We introduce iris-based kinship recognition for pigeons, release a dataset, define a pedigree-graph graded kinship metric, and [TBD: show pedigree-supervised training improves iris-kinship alignment]. Limitations and broader impact: kinship is record-derived; potential misuse in breeding fraud.
+We introduce iris-based kinship recognition for pigeons, release a dataset, define a pedigree-graph graded kinship metric, and show pedigree-supervised training improves iris-kinship alignment (Spearman -0.699 -> -0.716, graded nDCG +21%). Limitations and broader impact: kinship is record-derived; potential misuse in breeding fraud.
