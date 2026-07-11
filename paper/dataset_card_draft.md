@@ -66,10 +66,26 @@ Stage1 图片索引 → Stage2 YOLOv5 眼部检测裁剪 → Stage3 U-Net 虹膜
 - 原始图/裁剪/归一化图/权重/特征向量/FAISS：HuggingFace `jshouEX/pigeon-breed-image-dataset`
 - Stage 7 族谱产物（parsed_pedigree / 图 / 向量 / 编码）：`data/pedigree/`（小型 CSV 进 git）
 
-## 9. 待办（Phase B）
+## 9. Phase B 实证结果（贡献①：虹膜可判定血缘）
 
-- [ ] 最终图像/个体/血脉统计校准
+用 Relation-SupCon 编码器（干净切分，无 val 泄漏）抽全量特征，对 7,144 已知亲缘对算 iris L2 距离与族谱 k：
+
+| 指标 | 值 |
+|------|---|
+| Spearman(iris_dist, 族谱 k) | **−0.699** |
+| Spearman(iris_dist, IDF 启发) | −0.638（族谱 k 吻合度超过训练代理） |
+| AUC 全同胞 vs 无关 | 0.939 |
+| AUC 半同胞 vs 无关 | 0.923 |
+| AUC 表亲 vs 无关 | 0.883 |
+| AUC 任意亲缘 vs 无关 | 0.910 |
+| graded nDCG@20（族谱 k） | 0.459（随机 0.038） |
+| 分层 iris 距离 | 全同胞 0.736 < 半同胞 0.846 < 表亲 1.027 < 无关 1.400（单调） |
+
+**结论**：虹膜特征距离与族谱亲缘强负相关，分层单调，AUC 0.88–0.94，证明虹膜携带血缘信息。详见 `paper/phaseB_iris_kinship_split.md`。
+
+## 10. 待办
+
+- [ ] 按亲缘 tier 分层的训练/测试划分方案（确保测试家系与训练不重叠）
+- [ ] Phase C 方法贡献（族谱 k 监督重训）锁定后补主实验表
 - [ ] 亲缘 tier 阈值校准（与 φ 对齐）
-- [ ] 按亲缘分层的训练/测试划分方案
-- [ ] 虹膜特征距离 ↔ k 相关性实验（贡献①证明）
 - [ ] 数据集卡英文版（投稿用）
