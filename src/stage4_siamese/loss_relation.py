@@ -63,12 +63,16 @@ def weighted_supcon_loss(
     relevance: torch.Tensor,
     temperature: float = 0.07,
     negative_margin: float | None = None,
+    positive_cutoff: float | None = None,
 ) -> torch.Tensor:
     """Supervised contrastive loss weighted by graded relation relevance.
 
     Positive pairs contribute proportionally to relevance. Clear negatives are
     pairs with zero relevance. Weakly related pairs are positives, not negatives.
     If negative_margin is supplied, negatives use max(0, margin - relevance).
+    If positive_cutoff is supplied, pairs with relevance < cutoff are treated as
+    negatives (only strong-kin k>=cutoff are graded positives) -- preserves
+    fine-grained tier separation (close-kin pulled together, distant-kin pushed).
     """
     if embeddings.ndim != 2:
         raise ValueError(f"embeddings must be 2D, got {tuple(embeddings.shape)}")
@@ -80,7 +84,20 @@ def weighted_supcon_loss(
     relevance = relevance.to(device=embeddings.device, dtype=torch.float32).clamp(0.0, 1.0)
     eye = torch.eye(batch_size, dtype=torch.bool, device=embeddings.device)
     relevance = relevance.masked_fill(eye, 0.0)
-    has_positive = (relevance > 0.0).any(dim=1)
+
+    if positive_cutoff is not None and float(positive_cutoff) > 0.0:
+        cutoff = float(positive_cutoff)
+        pos_mask = relevance >= cutoff
+        has_positive = pos_mask.any(dim=1)
+        positive_weight = relevance * pos_mask.to(torch.float32)
+        negative_weight = (~pos_mask & ~eye).to(torch.float32)
+    else:
+        has_positive = (relevance > 0.0).any(dim=1)
+        positive_weight = relevance
+        if negative_margin is None:
+            negative_weight = ((relevance <= 0.0) & ~eye).to(torch.float32)
+        else:
+            negative_weight = torch.clamp(float(negative_margin) - relevance, min=0.0).masked_fill(eye, 0.0)
     if not has_positive.any():
         return embeddings.sum() * 0.0
 

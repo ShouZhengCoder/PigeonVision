@@ -66,6 +66,7 @@ class RelationDataset(Dataset):
         transform=None,
         limit: int | None = None,
         kinship_vectors: str | Path | None = None,
+        fallback_scale: float = 1.0,
     ) -> None:
         self.meta_path = Path(meta_path)
         self.iris_dir = Path(iris_dir)
@@ -95,6 +96,7 @@ class RelationDataset(Dataset):
         self.sum_idf = np.asarray([_set_weight(ids, self.idf_by_index) for ids in self.blood_id_sets], dtype=np.float64)
         self.inverted = self._build_inverted()
         self.kinship_vec = self._load_kinship_vectors(kinship_vectors)
+        self.fallback_scale = float(fallback_scale)
         self.blood_id_sets_by_img = {self.img_ids[i]: self.blood_id_sets[i] for i in range(len(self.img_ids))}
 
     def _load_kinship_vectors(self, path: str | Path | None) -> dict[str, dict[str, float]]:
@@ -119,10 +121,10 @@ class RelationDataset(Dataset):
             small, large = (va, vb) if len(va) <= len(vb) else (vb, va)
             k = sum(c * large.get(x, 0.0) for x, c in small.items()) / self.PED_K_NORM
             return float(max(0.0, min(1.0, k)))
-        # IDF 兜底(覆盖无结构系谱的鸽子)
+        # IDF 兜底(覆盖无结构系谱的鸽子), 按 fallback_scale 降权使 pedigree k 主导
         sa = self.blood_id_sets_by_img.get(str(a_img_id), set())
         sb = self.blood_id_sets_by_img.get(str(b_img_id), set())
-        return relation_score(sa, sb, self.idf_by_index)
+        return relation_score(sa, sb, self.idf_by_index) * self.fallback_scale
 
     def _build_idf(self) -> dict[int, float]:
         n = len(self.blood_id_sets)

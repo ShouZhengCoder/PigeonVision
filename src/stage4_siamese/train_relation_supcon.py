@@ -31,6 +31,10 @@ def parse_args() -> argparse.Namespace:
                         help="Relevance source: idf (blood_id heuristic, baseline) or pedigree (Phase C hybrid k).")
     parser.add_argument("--kinship-vectors", type=Path, default=ROOT / "data" / "pedigree" / "contribution_vectors.csv",
                         help="Phase A contribution vectors (used when --kinship-source pedigree).")
+    parser.add_argument("--fallback-scale", type=float, default=1.0,
+                        help="Scale IDF fallback in hybrid kinship (0-1; <1 downweights non-structured pairs so pedigree k dominates).")
+    parser.add_argument("--positive-cutoff", type=float, default=None,
+                        help="Relevance below this treated as negative (only k>=cutoff are graded positives); preserves tier separation.")
     parser.add_argument("--feat-dim", type=int, default=256)
     parser.add_argument("--backbone", default="resnet34")
     parser.add_argument("--epochs", type=int, default=60)
@@ -155,6 +159,7 @@ def main() -> int:
         transform=train_transform,
         limit=int(args.limit_train) or None,
         kinship_vectors=resolve_root_path(args.kinship_vectors) if args.kinship_source == "pedigree" else None,
+        fallback_scale=float(args.fallback_scale) if args.kinship_source == "pedigree" else 1.0,
     )
     val_ds = RelationDataset(
         relation_meta,
@@ -244,6 +249,7 @@ def main() -> int:
                 relevance,
                 temperature=float(args.temperature),
                 negative_margin=args.negative_margin,
+                positive_cutoff=args.positive_cutoff,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(encoder.parameters(), 5.0)
