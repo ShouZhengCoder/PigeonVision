@@ -161,6 +161,8 @@ def main():
     print(f'  半同胞: {st(D_half)}')
     print(f'  表亲:   {st(D_cous)}')
     print(f'  无关:   {st(D_un)}')
+    mono = bool(D_full.mean() < D_half.mean() < D_cous.mean() < D_un.mean())
+    print(f'  分层单调(全<半<表<无关): {"PASS" if mono else "FAIL"}')
 
     # 7. AUC: 各 tier vs 无关 (iris_dist 越小越像同血脉)
     def auc(d_pos, d_neg):
