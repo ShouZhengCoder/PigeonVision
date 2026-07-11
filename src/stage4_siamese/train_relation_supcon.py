@@ -17,6 +17,9 @@ from _common import ROOT, ensure_dir, resolve_root_path
 from dataset import default_transform, split_meta_for_training
 from dataset_relation import RelationBatchSampler, RelationDataset, collate_relation
 from loss_relation import kinship_relevance_matrix, relation_relevance_matrix, weighted_supcon_loss
+
+from scipy.stats import spearmanr
+from sklearn.metrics import roc_auc_score
 from model import IrisEncoder
 from relation_metrics import build_blood_id_idf, compute_cross_search_metrics_by_graded_blood_ids
 
@@ -35,6 +38,8 @@ def parse_args() -> argparse.Namespace:
                         help="Scale IDF fallback in hybrid kinship (0-1; <1 downweights non-structured pairs so pedigree k dominates).")
     parser.add_argument("--positive-cutoff", type=float, default=None,
                         help="Relevance below this treated as negative (only k>=cutoff are graded positives); preserves tier separation.")
+    parser.add_argument("--select-by", choices=["idf", "kinship"], default="idf",
+                        help="Val metric to select best.pt: idf (graded_nDCG) or kinship (pedigree-k Spearman, aligned with Phase B).")
     parser.add_argument("--feat-dim", type=int, default=256)
     parser.add_argument("--backbone", default="resnet34")
     parser.add_argument("--epochs", type=int, default=60)
@@ -135,6 +140,33 @@ def extract_features(
 def save_checkpoint(path: Path, payload: dict) -> None:
     ensure_dir(path.parent)
     torch.save(payload, path)
+
+
+def pedigree_k_val_metric(feats, ids, kinship_fn, n_sample: int = 4000) -> dict:
+    """Phase B 口径的 val 指标: Spearman(iris_dist, pedigree_k) + AUC(kin vs unrelated)。
+    用于 --select-by kinship 时选 best.pt(对齐 Phase B 目标, 而非 IDF nDCG)。"""
+    feats = np.asarray(feats, dtype=np.float32)
+    feats = feats / np.maximum(np.linalg.norm(feats, axis=1, keepdims=True), 1e-12)
+    n = len(ids)
+    if n < 2:
+        return {"spearman": 0.0, "auc": 0.0}
+    rng = np.random.default_rng(12345)
+    m = min(n_sample, n * (n - 1) // 2)
+    a = rng.integers(0, n, size=m)
+    b = rng.integers(0, n, size=m)
+    mask = a != b
+    a, b = a[mask], b[mask]
+    dist = np.linalg.norm(feats[a] - feats[b], axis=1)
+    k = np.array([float(kinship_fn(str(ids[int(a[i])]), str(ids[int(b[i])]))) for i in range(len(a))])
+    sp = 0.0
+    if len(set(k.tolist())) > 1:
+        s, _ = spearmanr(dist, k)
+        sp = float(s) if s == s else 0.0
+    label = (k > 0.1).astype(int)
+    auc = 0.0
+    if 0 < label.sum() < len(label):
+        auc = float(roc_auc_score(label, -dist))
+    return {"spearman": sp, "auc": auc}
 
 
 def main() -> int:
@@ -259,6 +291,7 @@ def main() -> int:
 
         avg_loss = total_loss / max(steps, 1)
         metrics = {"graded_ndcg_at_10": 0.0, "avg_relevance_at_10": 0.0, "precision_at_10": 0.0, "mAP": 0.0}
+        kin_val = {"spearman": 0.0, "auc": 0.0}
         if int(args.eval_every) > 0 and epoch % int(args.eval_every) == 0:
             gids, gfeats = extract_features(encoder, train_ds, gallery_indices, device, int(args.batch_size), int(args.num_workers))
             vids, vfeats = extract_features(encoder, val_ds, eval_val_indices, device, int(args.batch_size), int(args.num_workers))
@@ -272,9 +305,15 @@ def main() -> int:
                     idf=idf,
                     exclude_self=False,
                 )
+                if args.select_by == "kinship" and args.kinship_source == "pedigree":
+                    kin_val = pedigree_k_val_metric(vfeats, vids, train_ds.kinship)
 
-        primary = float(metrics.get("graded_ndcg_at_10", 0.0))
-        tie = float(metrics.get("avg_relevance_at_10", 0.0))
+        if args.select_by == "kinship" and args.kinship_source == "pedigree":
+            primary = -float(kin_val["spearman"])  # Spearman 更负=更好 -> 取负作 primary(更高=更好)
+            tie = float(kin_val["auc"])
+        else:
+            primary = float(metrics.get("graded_ndcg_at_10", 0.0))
+            tie = float(metrics.get("avg_relevance_at_10", 0.0))
         is_best = primary > best_primary or (primary == best_primary and tie > best_tie)
         if is_best:
             best_primary = primary
