@@ -1,0 +1,116 @@
+%% Pattern Recognition (Elsevier) 投稿模板
+%% 文档类: elsarticle (TeX Live 自带, 或 CTAN/Overleaf)
+%% [review] = 双倍行距+行号(投稿审稿用); [3p] = 单栏; 最终录用改 [final,5p]
+%% 投稿前必读: https://www.sciencedirect.com/journal/pattern-recognition/publish/guide-for-authors
+\documentclass[review,3p]{elsarticle}
+
+\usepackage{lineno}
+\modulolinenumbers[5]
+
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\journal{Pattern Recognition}
+
+\begin{document}
+
+\begin{frontmatter}
+\title{Iris-Based Kinship Recognition in Pigeons via\\
+Pedigree-Graph Supervised Representation Learning}
+
+\author[a]{First Author}
+\author[a]{Second Author\corref{cor1}}
+\cortext[cor1]{Corresponding author}
+
+\affiliation[a]{organization={School/Department, University},
+                addressline={Address line},
+                city={City},
+                postcode={000000},
+                country={China}}
+
+\begin{abstract}
+We study a novel problem: \emph{kinship recognition from iris images in pigeons}---determining the genealogical relatedness of two pigeons solely from their iris texture. We release a dataset of 25{,}690 normalized iris images linked to 126{,}105 pedigree records extracted from raw bloodline-text data. We make two core contributions. (1) We show that iris feature distance correlates strongly with true pedigree kinship (Spearman $-0.716$, AUC $0.93$ on unseen individuals), demonstrating iris carries bloodline information. (2) We define a graded kinship metric from a pedigree graph built by parsing structured father/mother/grandparent fields, combining a literal ancestor-path code (recursive parent-code concatenation + LCS) with a founder-contribution vector whose dot product yields the kinship coefficient. We further propose \emph{pedigree-supervised graded SupCon}, training the iris encoder with the pedigree kinship as graded relevance, which improves graded nDCG@20 by 19\% over the IDF-heuristic proxy while restoring fine-grained tier monotonicity. Code and data are released.
+\end{abstract}
+
+\begin{keyword}
+Iris recognition \sep Kinship verification \sep Representation learning \sep
+Metric learning \sep Pedigree graph \sep Supervised contrastive learning
+\end{keyword}
+\end{frontmatter}
+
+\linenumbers
+
+%% ============ 正文(内容见 paper/paper_draft.md, 逐节填入) ============
+
+\section{Introduction}
+\label{sec:intro}
+% 见 paper_draft.md 第1节. 要点: 信鸽育种血统验证需求; 虹膜能否判血缘的假设;
+% 与人虹膜识别(身份非血缘)、人脸血缘验证(不同模态)的区别; 三贡献.
+
+\section{Related Work}
+\label{sec:related}
+% 2.1 Iris recognition (Daugman, 人虹膜身份; 无鸽虹膜/血缘前作)
+% 2.2 Kinship verification (人脸血缘验证, 多为二值; 本文扩展到 graded multi-label)
+% 2.3 Metric learning (SupCon, ArcFace, Proxy-Anchor; graded-relevance weighted SupCon)
+% 2.4 Pedigree/genetic kinship (numerator relationship matrix, Henderson; kinship coefficient $\phi$)
+
+\section{Method}
+\label{sec:method}
+\subsection{Pedigree Graph Construction}
+% 解析 details.txt (父亲/母亲/祖父/祖母/外祖父/外祖母:足环号); 53,158 节点 / 19,642 边 /
+% 42,609 founder; 环号合法性过滤; founder=无入度; 5 记录环用路径内 visited 处理.
+
+\subsection{Kinship Encoding}
+% 形式A(字面): founder 唯一码 + 后代=父母码递归拼接(无界到 founder) + LCS 相似度.
+% 形式B(向量): $v_i[a]=\sum_{\text{paths }i\to a}(1/2)^{\text{depth}}$, $k(i,j)=v_i\cdot v_j \approx 2\phi_{ij}$.
+% Hybrid: 无结构系谱者用 IDF 加权 blood_id 集合兜底.
+
+\subsection{Pedigree-Supervised Graded SupCon}
+% Relevance matrix $R_{ij}=k(i,j)$ (hybrid). Loss:
+% \[ L = -\log\frac{\sum_j \exp(s_{ij}/\tau)\,R_{ij}}{\sum_j \exp(s_{ij}/\tau)\,(R_{ij}^{+} + (1-R_{ij}^{+}))} \]
+% $R_{ij}^{+}=R_{ij}\,\mathbf{1}[R_{ij}\ge\text{cutoff}]$ (弱亲缘当负样本保 tier);
+% fallback 降权(fallback\_scale=0.3)使 pedigree k 主导.
+
+\section{Dataset}
+\label{sec:dataset}
+% 25,690 归一化虹膜图(64x512, Daugman+mask); 31,896 原始图;
+% pigeon.csv(PG_ID/BLOOD) + relations.csv(250,207 image-ancestor 对) + details.txt(系谱);
+% clean split 17,983/2,526; 局限: 结构系谱覆盖14.8%, 64%孤立, 记录推导非基因.
+
+\section{Experiments}
+\label{sec:exp}
+\subsection{Iris distance vs pedigree kinship (Contribution 1)}
+% Table: Spearman -0.716, AUC full/half/cousin 0.954/0.946/0.906, 单调.
+% Fig: 散点(iris_dist vs k) + 分层箱线.
+
+\subsection{Kinship encoding validation (Contribution 2)}
+% Table: 全同胞0.715>半同胞0.400>表亲0.104>无关0.000, 单调, 与理论吻合.
+
+\subsection{Pedigree-supervised training (Contribution 3)}
+% Table (公平 150ep): idf -0.711/0.467/0.921; hybrid(v2) -0.716/0.558/0.931; ped_only -0.601/0.280/0.882(FAIL).
+
+\subsection{Ablations}
+% D1 kinship source (上表); D2 depth; D3 graded vs binary; D4 cutoff sweep.
+
+\section{Conclusion}
+\label{sec:conclusion}
+% 信鸽虹膜血缘识别新问题; 数据集+编码+方法三贡献; 局限与 broader impact (育种防伪/误用).
+
+\section*{Declaration of competing interest}
+The authors declare no competing financial or personal interests.
+
+\section*{Acknowledgments}
+% 基金/致谢.
+
+%% 参考文献: Pattern Recognition 用 numbered 风格 (elsarticle-num); 也接受 author-year.
+%% 投稿前在 Guide for Authors 确认; refs 见 refs.bib
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
+
+\end{document}
