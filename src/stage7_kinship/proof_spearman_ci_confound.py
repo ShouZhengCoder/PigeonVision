@@ -94,7 +94,7 @@ def main():
     rows = []
     for tier, pairs in [('full', full), ('half', half), ('cousin', cous), ('unrelated', unrel)]:
         for a, b in pairs:
-            rows.append({'tier': tier, 'd': d_iris(a, b), 'k': k_ped(a, b),
+            rows.append({'tier': tier, 'a': a, 'b': b, 'd': d_iris(a, b), 'k': k_ped(a, b),
                          'k_idf': k_idf(a, b), 'same_pg': same_pg(a, b)})
     df = pd.DataFrame(rows)
     print(f'pairs: {len(df)} (full={len(full)}, half={len(half)}, cousin={len(cous)}, unrel={len(unrel)})')
@@ -104,17 +104,32 @@ def main():
     print(f'Spearman(d, k_ped) = {sp_ped:.4f}')
     print(f'Spearman(d, k_idf) = {sp_idf:.4f}  [training heuristic]')
 
-    # bootstrap CI on Spearman(d, k_ped)
+    # bootstrap CI on Spearman(d, k_ped) -- three subsets per reviewer request
     rng = np.random.default_rng(0)
-    n = len(df); boots = []
     d_arr = df['d'].to_numpy(); k_arr = df['k'].to_numpy()
-    for _ in range(args.boot):
-        s = rng.integers(0, n, n)
-        r, _ = spearmanr(d_arr[s], k_arr[s])
-        boots.append(r)
-    boots = np.array(boots)
-    ci = (float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5)))
-    print(f'bootstrap 95% CI for Spearman(d,k): [{ci[0]:.4f}, {ci[1]:.4f}]  ({args.boot} resamples)')
+    kin_mask = k_arr > 0
+    # full-structured subset: both pigeons have both parents recorded
+    full_struct = set(i for i in struct if all(par.get(i, ('', ''))))
+    fs_mask = np.array([a in full_struct and b in full_struct for a, b in
+                        zip(df['a'], df['b'])]) if 'a' in df.columns else None
+    subsets = {'all_12147': np.ones(len(df), dtype=bool),
+               'kin_only_k_gt0': kin_mask}
+    if fs_mask is not None and fs_mask.sum() > 20:
+        subsets['full_structured_both_parents'] = fs_mask
+    ci_out = {}
+    for name, m in subsets.items():
+        dd = df.loc[m, 'd'].to_numpy(); kk = df.loc[m, 'k'].to_numpy()
+        if len(dd) < 10:
+            ci_out[name] = None; continue
+        sp, _ = spearmanr(dd, kk)
+        n = len(dd); boots = []
+        for _ in range(args.boot):
+            s = rng.integers(0, n, n)
+            r, _ = spearmanr(dd[s], kk[s]); boots.append(r)
+        boots = np.array(boots)
+        ci_out[name] = {'n': int(n), 'spearman': float(sp),
+                        'ci95': [float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5))]}
+        print(f'Spearman [{name}] n={n}: {sp:.4f} CI[{np.percentile(boots,2.5):.4f},{np.percentile(boots,97.5):.4f}]')
 
     # confound: tier means overall vs same-pg-only
     tier_means_all = df.groupby('tier')['d'].mean().to_dict()
@@ -134,11 +149,11 @@ def main():
     un_diff = un[~un['same_pg']]['d'].mean()
 
     out = {
-        'n_pairs': int(n),
+        'n_pairs': int(len(df)),
         'n_full': len(full), 'n_half': len(half), 'n_cousin': len(cous), 'n_unrel': len(unrel),
-        'spearman_d_kped': float(sp_ped),
+        'spearman_d_kped_all': float(sp_ped),
         'spearman_d_kidf': float(sp_idf),
-        'spearman_ci95': ci,
+        'spearman_subsets': ci_out,
         'bootstrap_iters': args.boot,
         'tier_mean_iris_dist_all': {k: float(v) for k, v in tier_means_all.items()},
         'tier_mean_iris_dist_samepg': {k: float(v) for k, v in tier_means_samepg.items()},
