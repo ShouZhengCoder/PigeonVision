@@ -1,0 +1,33 @@
+{
+  "epoch": 33,
+  "single_label (blood_name match)": {
+    "search": {
+      "recall_at_1": 0.383215,
+      "recall_at_5": 0.583135,
+      "recall_at_10": 0.676168,
+      "mAP": 0.147387
+    },
+    "compare": {
+      "accuracy": 0.583333,
+      "balanced_accuracy": 0.583333,
+      "auc": 0.602015,
+      "eer": 0.438044,
+      "threshold": 1.252232
+    }
+  },
+  "multi_label (blood_id overlap)": {
+    "search": {
+      "recall_at_1": 0.241093,
+      "recall_at_5": 0.394695,
+      "recall_at_10": 0.478226,
+      "mAP": 0.160667
+    },
+    "compare": {
+      "accuracy": 0.651997,
+      "balanced_accuracy": 0.651997,
+      "auc": 0.701912,
+      "eer": 0.362776,
+      "threshold": 1.270877
+    }
+  }
+}

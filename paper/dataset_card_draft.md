@@ -81,7 +81,7 @@ Stage1 图片索引 → Stage2 YOLOv5 眼部检测裁剪 → Stage3 U-Net 虹膜
 | graded nDCG@20（族谱 k） | 0.459（随机 0.038） |
 | 分层 iris 距离 | 全同胞 0.736 < 半同胞 0.846 < 表亲 1.027 < 无关 1.400（单调） |
 
-**结论**：虹膜特征距离与族谱亲缘强负相关，分层单调，AUC 0.88–0.94，证明虹膜携带血缘信息。详见 `paper/phaseB_iris_kinship_split.md`。
+**结论**：虹膜特征距离与族谱亲缘强负相关，分层单调，AUC 0.88–0.94，证明虹膜携带血缘信息。详见 `paper/reports/phaseB_iris_kinship_split.md`。
 
 ## 10. 待办
 

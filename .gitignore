@@ -65,3 +65,19 @@ src/stage6_android/.idea/
 src/stage6_android/captures/
 src/stage6_android/.externalNativeBuild/
 src/stage6_android/.cxx/
+
+# ---- 归档目录的二进制(归档内容的大文件不进 git, 留本地) ----
+archive/**/*.npy
+archive/**/*.bin
+archive/**/*.a
+archive/**/*.so
+archive/**/*.apk
+archive/**/*.aab
+archive/**/*.dex
+archive/**/*.class
+archive/**/*.jar
+archive/course/src/stage6_android/**/.gradle/
+archive/course/src/stage6_android/**/build/
+archive/course/src/stage6_android/**/.cxx/
+archive/course/src/stage6_android/**/.externalNativeBuild/
+archive/course/src/stage6_android/**/.kotlin/

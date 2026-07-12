@@ -1,7 +1,7 @@
 # Iris-Based Kinship Recognition in Pigeons via Pedigree-Graph Supervised Representation Learning
 
 > **Branch `paper`** - 论文工作分支。课程大作业（stages 1-6 部署系统）在 `master` 分支 / `course-final` tag。
-> 课程相关的旧文档已移至 `archive/course/`。
+> 课程内容（部署系统、旧文档、废弃实验）已归档至 `archive/`；课程完整系统在 `master` 分支。
 
 面向 CCF-B 表征学习期刊投稿。三个贡献：
 
@@ -17,8 +17,7 @@ paper/                      # 论文材料
 ├── dataset_card_draft.md   # 数据集卡（含 Phase B 实证）
 ├── experiments_table.md    # 实验对比表
 ├── 汇报_老师.md             # 阶段汇报
-├── phaseA_kinship_validation.md   # 贡献②验证报告
-├── phaseB_iris_kinship_*.md       # 贡献①/③评估报告（full/split/kinship_v2/idf_150/ped_only_150）
+├── reports/                # 评估报告（phaseA 单调验证, phaseB 各模型 iris-亲缘评估）
 └── fig/                    # 论文图
 
 src/stage7_kinship/         # 论文核心代码
@@ -39,7 +38,7 @@ configs/                    # 训练配置
 scripts/                    # 工具脚本（含 sync_hf, run_phaseD_ablation）
 ```
 
-> `src/stage5_server/`、`src/stage6_android/` 是课程部署系统（Flask + Android），论文不直接使用但保留作编码器落地。
+> **已归档（论文不使用）**：`archive/course/`（stage5 Flask、stage6 Android、课程文档），`archive/legacy_outputs/`（旧 1024d 融合基线、PG 检索库、v1 中间模型）。课程完整系统在 `master` 分支 / `course-final` tag。
 
 ## 复现
 

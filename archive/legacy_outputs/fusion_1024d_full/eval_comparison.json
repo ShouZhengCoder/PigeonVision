@@ -1,0 +1,32 @@
+{
+  "single_label": {
+    "search": {
+      "recall_at_1": 0.511876,
+      "recall_at_5": 0.656374,
+      "recall_at_10": 0.733967,
+      "mAP": 0.216435
+    },
+    "compare": {
+      "accuracy": 0.610055,
+      "balanced_accuracy": 0.610055,
+      "auc": 0.642262,
+      "eer": 0.409145,
+      "threshold": 2.316508
+    }
+  },
+  "multi_label": {
+    "search": {
+      "recall_at_1": 0.314727,
+      "recall_at_5": 0.489707,
+      "recall_at_10": 0.562945,
+      "mAP": 0.209126
+    },
+    "compare": {
+      "accuracy": 0.681087,
+      "balanced_accuracy": 0.681087,
+      "auc": 0.737686,
+      "eer": 0.335522,
+      "threshold": 2.277788
+    }
+  }
+}
