@@ -1,0 +1,35 @@
+{
+  "n_pairs": 12147,
+  "n_full": 1308,
+  "n_half": 2889,
+  "n_cousin": 2950,
+  "n_unrel": 5000,
+  "spearman_d_kped": -0.6985649188156677,
+  "spearman_d_kidf": -0.6379864159206682,
+  "spearman_ci95": [
+    -0.7081545501483861,
+    -0.6878388274610837
+  ],
+  "bootstrap_iters": 1000,
+  "tier_mean_iris_dist_all": {
+    "cousin": 1.0266774780517918,
+    "full": 0.7362782669193838,
+    "half": 0.8455574026840003,
+    "unrelated": 1.3995035237312317
+  },
+  "tier_mean_iris_dist_samepg": {
+    "cousin": 0.6483304649591446,
+    "full": 0.21951491716835234,
+    "half": 0.20883741745581993
+  },
+  "tier_n_samepg": {
+    "cousin": 4,
+    "full": 45,
+    "half": 13
+  },
+  "monotonic_within_samepg": null,
+  "spearman_within_samepg": null,
+  "unrelated_samepg_mean_dist": NaN,
+  "unrelated_diffpg_mean_dist": 1.3995035237312317,
+  "loft_confound_on_unrelated": NaN
+}
