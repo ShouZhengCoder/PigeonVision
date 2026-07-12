@@ -81,3 +81,6 @@ archive/course/src/stage6_android/**/build/
 archive/course/src/stage6_android/**/.cxx/
 archive/course/src/stage6_android/**/.externalNativeBuild/
 archive/course/src/stage6_android/**/.kotlin/
+
+# ---- Overleaf 同步项目(独立 git 仓库, 远端在 Overleaf) ----
+paper/overleaf/

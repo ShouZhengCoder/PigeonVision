@@ -18,7 +18,9 @@ paper/                      # 论文材料
 ├── experiments_table.md    # 实验对比表
 ├── 汇报_老师.md             # 阶段汇报
 ├── reports/                # 评估报告（phaseA 单调验证, phaseB 各模型 iris-亲缘评估）
-└── fig/                    # 论文图
+├── fig/                    # 论文图（canonical，进 git）
+└── overleaf/               # Overleaf 同步项目（独立 git 仓库，远端在 Overleaf；.gitignore 忽略）
+                              # LaTeX 家：main.tex / refs.bib / figs/ + elsarticle 模板。改完 push 到 Overleaf
 
 src/stage7_kinship/         # 论文核心代码
 ├── parse_pedigree.py       # 解析 details.txt 族谱
