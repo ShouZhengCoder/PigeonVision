@@ -1,13 +1,18 @@
 {
   "n_pairs": 12147,
+  "n_individuals_in_pairs": 2547,
   "n_full": 1308,
   "n_half": 2889,
   "n_cousin": 2950,
   "n_unrel": 5000,
   "spearman_d_kped_all": -0.6985649188156677,
-  "spearman_d_kidf": -0.6374945480729813,
+  "spearman_d_kidf": -0.6375134197595791,
+  "cluster_bootstrap_ci95": [
+    -0.7257585095293697,
+    -0.6661507548828617
+  ],
   "partial_spearman_d_kped_given_kidf": {
-    "r": -0.3725793353328811,
+    "r": -0.3725327814973445,
     "p": 0.0
   },
   "within_tier_spearman": {

@@ -166,11 +166,38 @@ def main():
             within[tier] = {'n': len(sub), 'spearman': float(sp), 'p': float(p)}
             print(f'within-tier Spearman [{tier}] n={len(sub)}: {sp:.4f} (p={p:.2e})')
 
+    # cluster-bootstrap CI (resample INDIVIDUALS, not pairs) - accounts for the
+    # non-independence of pairwise observations (each bird appears in many pairs)
+    indivs = sorted(set(df['a']) | set(df['b']))
+    indiv_idx = {x: i for i, x in enumerate(indivs)}
+    ai = np.array([indiv_idx[a] for a in df['a']])
+    bi = np.array([indiv_idx[b] for b in df['b']])
+    rng2 = np.random.default_rng(1)
+    cb_boots = []
+    for _ in range(args.boot):
+        samp = rng2.integers(0, len(indivs), len(indivs))  # resample individuals w/ replacement
+        counts = np.bincount(samp, minlength=len(indivs))
+        mult = counts[ai] * counts[bi]  # pair multiplicity in resampled multiset
+        keep = mult > 0
+        if keep.sum() < 50:
+            continue
+        dd = np.repeat(df['d'].to_numpy()[keep], mult[keep])
+        kk = np.repeat(df['k'].to_numpy()[keep], mult[keep])
+        if len(dd) > 200000:  # cap for speed: subsample
+            idx = rng2.choice(len(dd), 200000, replace=False)
+            dd = dd[idx]; kk = kk[idx]
+        r, _ = spearmanr(dd, kk); cb_boots.append(r)
+    cb_boots = np.array(cb_boots)
+    cb_ci = (float(np.percentile(cb_boots, 2.5)), float(np.percentile(cb_boots, 97.5)))
+    print(f'cluster-bootstrap Spearman CI (resample {len(indivs)} individuals): [{cb_ci[0]:.4f}, {cb_ci[1]:.4f}]')
+
     out = {
         'n_pairs': int(len(df)),
+        'n_individuals_in_pairs': len(indivs),
         'n_full': len(full), 'n_half': len(half), 'n_cousin': len(cous), 'n_unrel': len(unrel),
         'spearman_d_kped_all': float(sp_ped),
         'spearman_d_kidf': float(sp_idf),
+        'cluster_bootstrap_ci95': cb_ci,
         'partial_spearman_d_kped_given_kidf': {'r': float(partial_r), 'p': float(partial_p)},
         'within_tier_spearman': within,
         'spearman_subsets': ci_out,
