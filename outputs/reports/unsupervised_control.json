@@ -1,0 +1,17 @@
+{
+  "encoder": "ImageNet-pretrained ResNet-34 (no iris/kinship/text training)",
+  "n_pairs": 12147,
+  "spearman_d_kped": -0.28236773838915474,
+  "spearman_d_kidf": -0.3137560050292227,
+  "partial_spearman_d_kped_given_kidf": {
+    "r": -0.004120064767448946,
+    "p": 0.649798839796995
+  },
+  "tier_mean_iris_dist": {
+    "full": 0.44960839200810465,
+    "half": 0.4705612050771053,
+    "cousin": 0.49946613867909223,
+    "unrelated": 0.5254621052265167
+  },
+  "monotone": true
+}
