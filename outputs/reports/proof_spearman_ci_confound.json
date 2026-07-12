@@ -5,7 +5,28 @@
   "n_cousin": 2950,
   "n_unrel": 5000,
   "spearman_d_kped_all": -0.6985649188156677,
-  "spearman_d_kidf": -0.6377712727039896,
+  "spearman_d_kidf": -0.6374945480729813,
+  "partial_spearman_d_kped_given_kidf": {
+    "r": -0.3725793353328811,
+    "p": 0.0
+  },
+  "within_tier_spearman": {
+    "full": {
+      "n": 1308,
+      "spearman": -0.09649062926372048,
+      "p": 0.00047490158313681424
+    },
+    "half": {
+      "n": 2889,
+      "spearman": -0.020030454279191506,
+      "p": 0.2818077197083695
+    },
+    "cousin": {
+      "n": 2950,
+      "spearman": -0.31872436031800777,
+      "p": 1.2228304740553443e-70
+    }
+  },
   "spearman_subsets": {
     "all_12147": {
       "n": 12147,

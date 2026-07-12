@@ -148,11 +148,31 @@ def main():
     un_same = un[un['same_pg']]['d'].mean()
     un_diff = un[~un['same_pg']]['d'].mean()
 
+    # partial Spearman(iris_dist, k_ped | k_idf): does iris carry pedigree structure
+    # BEYOND the IDF training proxy? If significant, circularity is refuted (the
+    # encoder was trained on bloodline-set overlap, not parent-child structure).
+    from scipy.stats import rankdata, pearsonr
+    r_d = rankdata(df['d'].to_numpy()); r_kp = rankdata(df['k'].to_numpy()); r_ki = rankdata(df['k_idf'].to_numpy())
+    def resid(y, x):
+        b = np.polyfit(x, y, 1); return y - (b[0]*x + b[1])
+    partial_r, partial_p = pearsonr(resid(r_d, r_ki), resid(r_kp, r_ki))
+    print(f'partial Spearman(d, k_ped | k_idf) = {partial_r:.4f} (p={partial_p:.2e})  [circularity rebuttal]')
+    # within-tier Spearman (fine-grained resolution inside a single tier)
+    within = {}
+    for tier in ['full', 'half', 'cousin']:
+        sub = df[df['tier'] == tier]
+        if len(sub) > 20:
+            sp, p = spearmanr(sub['d'], sub['k'])
+            within[tier] = {'n': len(sub), 'spearman': float(sp), 'p': float(p)}
+            print(f'within-tier Spearman [{tier}] n={len(sub)}: {sp:.4f} (p={p:.2e})')
+
     out = {
         'n_pairs': int(len(df)),
         'n_full': len(full), 'n_half': len(half), 'n_cousin': len(cous), 'n_unrel': len(unrel),
         'spearman_d_kped_all': float(sp_ped),
         'spearman_d_kidf': float(sp_idf),
+        'partial_spearman_d_kped_given_kidf': {'r': float(partial_r), 'p': float(partial_p)},
+        'within_tier_spearman': within,
         'spearman_subsets': ci_out,
         'bootstrap_iters': args.boot,
         'tier_mean_iris_dist_all': {k: float(v) for k, v in tier_means_all.items()},
